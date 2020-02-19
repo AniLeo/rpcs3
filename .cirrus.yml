@@ -1,6 +1,7 @@
 container:
   image: gcc:latest
 task:
+  install_script: pkg install -y cmake lang/gcc9
   build_script: 
     - mkdir -p rpcs3_build
     - cd rpcs3_build
