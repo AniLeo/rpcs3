@@ -2,8 +2,8 @@ freebsd_instance:
   image_family: freebsd-13-0-snap
 
 task:
-  install_script: pkg install -y cmake lang/gcc9 gl glew openal pkgconfig python3 qt5
-  build_script: 
+  install_script: pkg install -y cmake lang/gcc9 glew pkgconfig python3 qt5
+  build_script:
     - mkdir -p rpcs3_build
     - cd rpcs3_build
     - cmake ../rpcs3/
