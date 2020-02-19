@@ -5,4 +5,4 @@ task:
     mkdir rpcs3_build
     cd rpcs3_build
     cmake ../rpcs3/
-    make -j3
+    make
