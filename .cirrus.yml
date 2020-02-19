@@ -2,7 +2,7 @@ container:
   image: gcc:latest
 task:
   build_script: 
-    mkdir rpcs3_build
+    mkdir -p rpcs3_build
     cd rpcs3_build
     cmake ../rpcs3/
     make
