@@ -4,6 +4,9 @@ freebsd_instance:
 task:
   install_script: pkg install -y cmake lang/gcc9 glew python3 qt5
   build_script:
+    - ls
+    - cd ..
+    - ls
     - mkdir -p rpcs3_build
     - cd rpcs3_build
     - cmake ../rpcs3/
