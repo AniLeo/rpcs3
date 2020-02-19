@@ -2,7 +2,7 @@ freebsd_instance:
   image_family: freebsd-13-0-snap
 
 task:
-  install_script: pkg install -y cmake lang/gcc9
+  install_script: pkg install -y cmake lang/gcc9 git cotire qt5
   build_script: 
     - mkdir -p rpcs3_build
     - cd rpcs3_build
