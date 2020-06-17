@@ -4,7 +4,8 @@
 #include "surface_utils.h"
 #include "../GCM.h"
 #include "../rsx_utils.h"
-#include "Utilities/span.h"
+
+#include <span>
 #include <list>
 
 namespace rsx

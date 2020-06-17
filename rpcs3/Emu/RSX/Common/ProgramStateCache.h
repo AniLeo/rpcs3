@@ -6,8 +6,8 @@
 #include "Utilities/hash.h"
 #include "Utilities/mutex.h"
 #include "util/logs.hpp"
-#include "Utilities/span.h"
 
+#include <span>
 #include <deque>
 
 enum class SHADER_TYPE
@@ -485,7 +485,7 @@ public:
 		return __null_pipeline_handle;
 	}
 
-	void fill_fragment_constants_buffer(gsl::span<f32> dst_buffer, const RSXFragmentProgram &fragment_program, bool sanitize = false) const
+	void fill_fragment_constants_buffer(std::span<f32> dst_buffer, const RSXFragmentProgram &fragment_program, bool sanitize = false) const
 	{
 		const auto I = m_fragment_shader_cache.find(fragment_program);
 		if (I == m_fragment_shader_cache.end())
