@@ -240,6 +240,7 @@ struct gl_render_target_traits
 		sink->set_rsx_pitch(ref->get_rsx_pitch());
 		sink->set_old_contents_region(prev, false);
 		sink->last_use_tag = ref->last_use_tag;
+		sink->raster_type = ref->raster_type;     // Can't actually cut up swizzled data
 	}
 
 	static
@@ -275,6 +276,7 @@ struct gl_render_target_traits
 		surface->last_use_tag = 0;
 		surface->stencil_init_flags = 0;
 		surface->memory_usage_flags = rsx::surface_usage_flags::unknown;
+		surface->raster_type = rsx::surface_raster_type::linear;
 	}
 
 	static
@@ -358,9 +360,9 @@ struct gl_render_targets : public rsx::surface_store<gl_render_target_traits>
 	std::vector<GLuint> free_invalidated(gl::command_context& cmd)
 	{
 		// Do not allow more than 256M of RSX memory to be used by RTTs
-		if (check_memory_overload(256 * 0x100000))
+		if (check_memory_usage(256 * 0x100000))
 		{
-			handle_memory_overload(cmd);
+			handle_memory_pressure(cmd, rsx::problem_severity::moderate);
 		}
 
 		std::vector<GLuint> removed;

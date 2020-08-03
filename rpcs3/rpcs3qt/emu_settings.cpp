@@ -7,6 +7,8 @@
 #include "Emu/System.h"
 #include "Emu/system_config.h"
 
+#include "util/yaml.hpp"
+
 LOG_CHANNEL(cfg_log, "CFG");
 
 extern std::string g_cfg_defaults; //! Default settings grabbed from Utilities/Config.h
@@ -73,31 +75,71 @@ void emu_settings::LoadSettings(const std::string& title_id)
 	fs::create_path(title_id.empty() ? fs::get_config_dir() : Emulator::GetCustomConfigDir());
 
 	// Load default config
-	m_defaultSettings = YAML::Load(g_cfg_defaults);
-	m_currentSettings = YAML::Load(g_cfg_defaults);
+	auto [default_config, default_error] = yaml_load(g_cfg_defaults);
+
+	if (default_error.empty())
+	{
+		m_defaultSettings = default_config;
+		m_currentSettings = YAML::Clone(default_config);
+	}
+	else
+	{
+		cfg_log.fatal("Failed to load default config:\n%s", default_error);
+		QMessageBox::critical(nullptr, tr("Config Error"), tr("Failed to load default config:\n%0")
+			.arg(QString::fromStdString(default_error)), QMessageBox::Ok);
+	}
 
 	// Add global config
-	fs::file config(fs::get_config_dir() + "/config.yml", fs::read + fs::write + fs::create);
-	m_currentSettings += YAML::Load(config.to_string());
+	const std::string global_config_path = fs::get_config_dir() + "config.yml";
+	fs::file config(global_config_path, fs::read + fs::write + fs::create);
+	auto [global_config, global_error] = yaml_load(config.to_string());
 	config.close();
+
+	if (global_error.empty())
+	{
+		m_currentSettings += global_config;
+	}
+	else
+	{
+		cfg_log.fatal("Failed to load global config %s:\n%s", global_config_path, global_error);
+		QMessageBox::critical(nullptr, tr("Config Error"), tr("Failed to load global config:\nFile: %0\nError: %1")
+			.arg(QString::fromStdString(global_config_path)).arg(QString::fromStdString(global_error)), QMessageBox::Ok);
+	}
 
 	// Add game config
 	if (!title_id.empty())
 	{
 		const std::string config_path_new = Emulator::GetCustomConfigPath(m_title_id);
 		const std::string config_path_old = Emulator::GetCustomConfigPath(m_title_id, true);
+		std::string custom_config_path;
 
 		if (fs::is_file(config_path_new))
 		{
-			config = fs::file(config_path_new, fs::read + fs::write);
-			m_currentSettings += YAML::Load(config.to_string());
-			config.close();
+			custom_config_path = config_path_new;
 		}
 		else if (fs::is_file(config_path_old))
 		{
-			config = fs::file(config_path_old, fs::read + fs::write);
-			m_currentSettings += YAML::Load(config.to_string());
-			config.close();
+			custom_config_path = config_path_old;
+		}
+
+		if (!custom_config_path.empty())
+		{
+			if (config = fs::file(custom_config_path, fs::read + fs::write))
+			{
+				auto [custom_config, custom_error] = yaml_load(config.to_string());
+				config.close();
+
+				if (custom_error.empty())
+				{
+					m_currentSettings += custom_config;
+				}
+				else
+				{
+					cfg_log.fatal("Failed to load custom config %s:\n%s", custom_config_path, custom_error);
+					QMessageBox::critical(nullptr, tr("Config Error"), tr("Failed to load custom config:\nFile: %0\nError: %1")
+						.arg(QString::fromStdString(custom_config_path)).arg(QString::fromStdString(custom_error)), QMessageBox::Ok);
+				}
+			}
 		}
 	}
 }
@@ -126,9 +168,11 @@ void emu_settings::SaveSettings()
 	if (config_name == g_cfg.name || m_title_id == Emu.GetTitleID())
 	{
 		// Update current config
-		g_cfg.from_string({out.c_str(), out.size()}, !Emu.IsStopped());
-
-		if (!Emu.IsStopped()) // Don't spam the log while emulation is stopped. The config will be logged on boot anyway.
+		if (!g_cfg.from_string({out.c_str(), out.size()}, !Emu.IsStopped()))
+		{
+			cfg_log.fatal("Failed to update configuration");
+		}
+		else if (!Emu.IsStopped()) // Don't spam the log while emulation is stopped. The config will be logged on boot anyway.
 		{
 			cfg_log.notice("Updated configuration:\n%s\n", g_cfg.to_string());
 		}
@@ -201,7 +245,7 @@ void emu_settings::EnhanceComboBox(QComboBox* combobox, emu_settings_type type, 
 	if (index == -1)
 	{
 		const std::string def = GetSettingDefault(type);
-		cfg_log.fatal("EnhanceComboBox '%s' tried to set an invalid value: %s. Setting to default: %s", cfg_adapter::get_setting_name(type), selected, def);
+		cfg_log.error("EnhanceComboBox '%s' tried to set an invalid value: %s. Setting to default: %s", cfg_adapter::get_setting_name(type), selected, def);
 		combobox->setCurrentIndex(combobox->findData(qstr(def)));
 		m_broken_types.insert(type);
 	}
@@ -251,7 +295,7 @@ void emu_settings::EnhanceCheckBox(QCheckBox* checkbox, emu_settings_type type)
 	}
 	else if (selected != "false")
 	{
-		cfg_log.fatal("EnhanceCheckBox '%s' tried to set an invalid value: %s. Setting to default: %s", cfg_adapter::get_setting_name(type), selected, def);
+		cfg_log.error("EnhanceCheckBox '%s' tried to set an invalid value: %s. Setting to default: %s", cfg_adapter::get_setting_name(type), selected, def);
 		checkbox->setChecked(def == "true");
 		m_broken_types.insert(type);
 	}
@@ -289,7 +333,7 @@ void emu_settings::EnhanceSlider(QSlider* slider, emu_settings_type type)
 
 	if (!ok_sel || val < min || val > max)
 	{
-		cfg_log.fatal("EnhanceSlider '%s' tried to set an invalid value: %d. Setting to default: %d. Allowed range: [%d, %d]", cfg_adapter::get_setting_name(type), val, def, min, max);
+		cfg_log.error("EnhanceSlider '%s' tried to set an invalid value: %d. Setting to default: %d. Allowed range: [%d, %d]", cfg_adapter::get_setting_name(type), val, def, min, max);
 		val = def;
 		m_broken_types.insert(type);
 	}
@@ -329,7 +373,7 @@ void emu_settings::EnhanceSpinBox(QSpinBox* spinbox, emu_settings_type type, con
 
 	if (!ok_sel || val < min || val > max)
 	{
-		cfg_log.fatal("EnhanceSpinBox '%s' tried to set an invalid value: %d. Setting to default: %d. Allowed range: [%d, %d]", cfg_adapter::get_setting_name(type), selected, def, min, max);
+		cfg_log.error("EnhanceSpinBox '%s' tried to set an invalid value: %d. Setting to default: %d. Allowed range: [%d, %d]", cfg_adapter::get_setting_name(type), selected, def, min, max);
 		val = def;
 		m_broken_types.insert(type);
 	}
@@ -371,7 +415,7 @@ void emu_settings::EnhanceDoubleSpinBox(QDoubleSpinBox* spinbox, emu_settings_ty
 
 	if (!ok_sel || val < min || val > max)
 	{
-		cfg_log.fatal("EnhanceDoubleSpinBox '%s' tried to set an invalid value: %f. Setting to default: %f. Allowed range: [%f, %f]", cfg_adapter::get_setting_name(type), val, def, min, max);
+		cfg_log.error("EnhanceDoubleSpinBox '%s' tried to set an invalid value: %f. Setting to default: %f. Allowed range: [%f, %f]", cfg_adapter::get_setting_name(type), val, def, min, max);
 		val = def;
 		m_broken_types.insert(type);
 	}
@@ -456,12 +500,24 @@ QStringList emu_settings::GetSettingOptions(emu_settings_type type) const
 
 std::string emu_settings::GetSettingDefault(emu_settings_type type) const
 {
-	return cfg_adapter::get_node(m_defaultSettings, settings_location[type]).Scalar();
+	if (auto node = cfg_adapter::get_node(m_defaultSettings, settings_location[type]); node && node.IsScalar())
+	{
+		return node.Scalar();
+	}
+	
+	cfg_log.fatal("GetSettingDefault(type=%d) could not retrieve the requested node", static_cast<int>(type));
+	return "";
 }
 
 std::string emu_settings::GetSetting(emu_settings_type type) const
 {
-	return cfg_adapter::get_node(m_currentSettings, settings_location[type]).Scalar();
+	if (auto node = cfg_adapter::get_node(m_currentSettings, settings_location[type]); node && node.IsScalar())
+	{
+		return node.Scalar();
+	}
+
+	cfg_log.fatal("GetSetting(type=%d) could not retrieve the requested node", static_cast<int>(type));
+	return "";
 }
 
 void emu_settings::SetSetting(emu_settings_type type, const std::string& val)
@@ -689,6 +745,15 @@ QString emu_settings::GetLocalizedSetting(const QString& original, emu_settings_
 		{
 		case enter_button_assign::circle: return tr("Enter with circle", "Enter button assignment");
 		case enter_button_assign::cross: return tr("Enter with cross", "Enter button assignment");
+		}
+		break;
+	case emu_settings_type::AudioChannels:
+		switch (static_cast<audio_downmix>(index))
+		{
+		case audio_downmix::no_downmix: return tr("Surround 7.1", "Audio downmix");
+		case audio_downmix::downmix_to_stereo: return tr("Downmix to Stereo", "Audio downmix");
+		case audio_downmix::downmix_to_5_1: return tr("Downmix to 5.1", "Audio downmix");
+		case audio_downmix::use_application_settings: return tr("Use application settings", "Audio downmix");
 		}
 		break;
 	default:

@@ -342,6 +342,7 @@ namespace rsx
 		rsx::surface_color_format color_format;
 		rsx::surface_depth_format depth_format;
 		rsx::surface_antialiasing aa_mode;
+		rsx::surface_raster_type raster_type;
 		u32 aa_factors[2];
 		bool depth_float;
 		bool ignore_change;
@@ -437,6 +438,9 @@ namespace rsx
 			void write(vm::addr_t sink, u64 timestamp, u32 type, u32 value);
 			void write(queued_report_write* writer, u64 timestamp, u32 value);
 
+			// Retire operation
+			void retire(class ::rsx::thread* ptimer, queued_report_write* writer, u32 result);
+
 		public:
 
 			ZCULL_control();
@@ -456,6 +460,7 @@ namespace rsx
 
 			// Conditionally sync any pending writes if range overlaps
 			flags32_t read_barrier(class ::rsx::thread* ptimer, u32 memory_address, u32 memory_range, flags32_t flags);
+			flags32_t read_barrier(class ::rsx::thread* ptimer, u32 memory_address, occlusion_query_info* query);
 
 			// Call once every 'tick' to update, optional address provided to partially sync until address is processed
 			void update(class ::rsx::thread* ptimer, u32 sync_address = 0, bool hint = false);

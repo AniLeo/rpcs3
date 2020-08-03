@@ -35,7 +35,7 @@ struct ppu_thread_cleaner
 
 void _sys_ppu_thread_exit(ppu_thread& ppu, u64 errorcode)
 {
-	vm::temporary_unlock(ppu);
+	ppu.state += cpu_flag::wait;
 
 	// Need to wait until the current writer finish
 	if (ppu.state & cpu_flag::memory) vm::g_mutex.lock_unlock();
@@ -90,7 +90,7 @@ s32 sys_ppu_thread_yield(ppu_thread& ppu)
 
 error_code sys_ppu_thread_join(ppu_thread& ppu, u32 thread_id, vm::ptr<u64> vptr)
 {
-	vm::temporary_unlock(ppu);
+	ppu.state += cpu_flag::wait;
 
 	sys_ppu_thread.trace("sys_ppu_thread_join(thread_id=0x%x, vptr=*0x%x)", thread_id, vptr);
 
@@ -404,13 +404,13 @@ error_code _sys_ppu_thread_create(vm::ptr<u64> thread_id, vm::ptr<ppu_thread_par
 	{
 		const u32 tid = idm::last_id();
 
-		std::string full_name = fmt::format("PPU[0x%x] Thread", tid);
+		std::string full_name = fmt::format("PPU[0x%x] ", tid);
 
 		if (threadname)
 		{
 			if (!ppu_name.empty())
 			{
-				fmt::append(full_name, " (%s)", ppu_name);
+				fmt::append(full_name, "%s ", ppu_name);
 			}
 		}
 
@@ -551,7 +551,7 @@ error_code sys_ppu_thread_recover_page_fault(u32 thread_id)
 		return CELL_ESRCH;
 	}
 
-	return mmapper_thread_recover_page_fault(thread_id);
+	return mmapper_thread_recover_page_fault(thread.ptr.get());
 }
 
 error_code sys_ppu_thread_get_page_fault_context(u32 thread_id, vm::ptr<sys_ppu_thread_icontext_t> ctxt)
@@ -572,7 +572,7 @@ error_code sys_ppu_thread_get_page_fault_context(u32 thread_id, vm::ptr<sys_ppu_
 	auto pf_events = g_fxo->get<page_fault_event_entries>();
 	std::shared_lock lock(pf_events->pf_mutex);
 
-	const auto evt = pf_events->events.find(thread_id);
+	const auto evt = pf_events->events.find(thread.ptr.get());
 	if (evt == pf_events->events.end())
 	{
 		return CELL_EINVAL;

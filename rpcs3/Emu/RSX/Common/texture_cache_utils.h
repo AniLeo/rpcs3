@@ -682,6 +682,44 @@ namespace rsx
 			AUDIT(m_unreleased_texture_objects == 0);
 		}
 
+		bool purge_unlocked_sections()
+		{
+			// Reclaims all graphics memory consumed by unlocked textures
+			bool any_released = false;
+			for (auto it = m_in_use.begin(); it != m_in_use.end();)
+			{
+				auto* block = *it;
+
+				if (block->get_exists_count() > block->get_locked_count())
+				{
+					for (auto& tex : *block)
+					{
+						if (tex.get_context() == rsx::texture_upload_context::framebuffer_storage ||
+							tex.is_locked() ||
+							!tex.exists())
+						{
+							continue;
+						}
+
+						ASSERT(!tex.is_locked() && tex.exists());
+						tex.destroy();
+						any_released = true;
+					}
+				}
+
+				if (block->get_exists_count() == 0)
+				{
+					it = m_in_use.erase(it);
+				}
+				else
+				{
+					it++;
+				}
+			}
+
+			return any_released;
+		}
+
 
 		/**
 		 * Callbacks
@@ -981,6 +1019,7 @@ namespace rsx
 
 		u32 gcm_format = 0;
 		bool pack_unpack_swap_bytes = false;
+		bool swizzled = false;
 
 		u64 sync_timestamp = 0;
 		bool synchronized = false;
@@ -1546,6 +1585,11 @@ namespace rsx
 			gcm_format = format;
 		}
 
+		void set_swizzled(bool is_swizzled)
+		{
+			swizzled = is_swizzled;
+		}
+
 		void set_memory_read_flags(memory_read_flags flags, bool notify_texture_cache = true)
 		{
 			const bool changed = (flags != readback_behaviour);
@@ -1613,6 +1657,11 @@ namespace rsx
 			return gcm_format;
 		}
 
+		bool is_swizzled() const
+		{
+			return swizzled;
+		}
+
 		memory_read_flags get_memory_read_flags() const
 		{
 			return readback_behaviour;
@@ -1643,12 +1692,12 @@ namespace rsx
 		/**
 		 * Comparison
 		 */
-		inline bool matches(const address_range &memory_range)
+		inline bool matches(const address_range &memory_range) const
 		{
 			return valid_range() && rsx::buffered_section::matches(memory_range);
 		}
 
-		bool matches(u32 format, u32 width, u32 height, u32 depth, u32 mipmaps)
+		bool matches(u32 format, u32 width, u32 height, u32 depth, u32 mipmaps) const
 		{
 			if (!valid_range())
 				return false;
@@ -1674,7 +1723,7 @@ namespace rsx
 			return true;
 		}
 
-		bool matches(u32 rsx_address, u32 format, u32 width, u32 height, u32 depth, u32 mipmaps)
+		bool matches(u32 rsx_address, u32 format, u32 width, u32 height, u32 depth, u32 mipmaps) const
 		{
 			if (!valid_range())
 				return false;
@@ -1685,7 +1734,7 @@ namespace rsx
 			return matches(format, width, height, depth, mipmaps);
 		}
 
-		bool matches(const address_range& memory_range, u32 format, u32 width, u32 height, u32 depth, u32 mipmaps)
+		bool matches(const address_range& memory_range, u32 format, u32 width, u32 height, u32 depth, u32 mipmaps) const
 		{
 			if (!valid_range())
 				return false;

@@ -118,6 +118,11 @@ enum : u32
 	SPU_STATUS_IS_ISOLATED         = 0x80,
 };
 
+enum : s32
+{
+	SPU_LS_SIZE = 0x40000,
+};
+
 enum : u32
 {
 	SYS_SPU_THREAD_BASE_LOW  = 0xf0000000,
@@ -170,23 +175,20 @@ public:
 	// Returns true on success
 	bool try_push(u32 value)
 	{
-		const u64 old = data.fetch_op([value](u64& data)
+		return data.fetch_op([value](u64& data)
 		{
-			if (data & bit_count) [[unlikely]]
-			{
-				data |= bit_wait;
-			}
-			else
+			if (!(data & bit_count)) [[likely]]
 			{
 				data = bit_count | value;
+				return true;
 			}
-		});
 
-		return !(old & bit_count);
+			return false;
+		}).second;
 	}
 
 	// Push performing bitwise OR with previous value, may require notification
-	void push_or(cpu_thread& spu, u32 value)
+	void push_or(u32 value)
 	{
 		const u64 old = data.fetch_op([value](u64& data)
 		{
@@ -196,7 +198,7 @@ public:
 
 		if (old & bit_wait)
 		{
-			spu.notify();
+			data.notify_one();
 		}
 	}
 
@@ -206,31 +208,28 @@ public:
 	}
 
 	// Push unconditionally (overwriting previous value), may require notification
-	void push(cpu_thread& spu, u32 value)
+	void push(u32 value)
 	{
 		if (data.exchange(bit_count | value) & bit_wait)
 		{
-			spu.notify();
+			data.notify_one();
 		}
 	}
 
 	// Returns true on success
 	bool try_pop(u32& out)
 	{
-		const u64 old = data.fetch_op([&](u64& data)
+		return data.fetch_op([&](u64& data)
 		{
 			if (data & bit_count) [[likely]]
 			{
 				out = static_cast<u32>(data);
 				data = 0;
+				return true;
 			}
-			else
-			{
-				data |= bit_wait;
-			}
-		});
 
-		return (old & bit_count) != 0;
+			return false;
+		}).second;
 	}
 
 	// Reading without modification
@@ -248,17 +247,93 @@ public:
 	}
 
 	// Pop unconditionally (loading last value), may require notification
-	u32 pop(cpu_thread& spu)
+	u32 pop()
 	{
 		// Value is not cleared and may be read again
 		const u64 old = data.fetch_and(~(bit_count | bit_wait));
 
 		if (old & bit_wait)
 		{
-			spu.notify();
+			data.notify_one();
 		}
 
 		return static_cast<u32>(old);
+	}
+
+	// Waiting for channel pop state availability, actually popping if specified
+	s64 pop_wait(cpu_thread& spu, bool pop = true)
+	{
+		while (true)
+		{
+			const u64 old = data.fetch_op([&](u64& data)
+			{
+				if (data & bit_count) [[likely]]
+				{
+					if (pop)
+					{
+						data = 0;
+						return true;
+					}
+
+					return false;
+				}
+
+				data = bit_wait;
+				return true;
+			}).first;
+
+			if (old & bit_count)
+			{
+				return static_cast<u32>(old);
+			}
+
+			if (spu.is_stopped())
+			{
+				return -1;
+			}
+
+			data.wait(bit_wait);
+		}
+	}
+
+	// Waiting for channel push state availability, actually pushing if specified
+	bool push_wait(cpu_thread& spu, u32 value, bool push = true)
+	{
+		while (true) 
+		{
+			u64 state;
+			data.fetch_op([&](u64& data)
+			{
+				if (data & bit_count) [[unlikely]]
+				{
+					data |= bit_wait;
+				}
+				else if (push)
+				{
+					data = bit_count | value;
+				}
+				else
+				{
+					state = data;
+					return false;
+				}
+
+				state = data;
+				return true;
+			});
+
+			if (!(state & bit_wait))
+			{
+				return true;
+			}
+
+			if (spu.is_stopped())
+			{
+				return false;
+			}
+
+			data.wait(state);
+		}
 	}
 
 	void set_value(u32 value, bool count = true)
@@ -528,26 +603,33 @@ public:
 	}
 };
 
+enum class spu_type : u32
+{
+	threaded,
+	raw,
+	isolated,
+};
+
 class spu_thread : public cpu_thread
 {
 public:
 	virtual std::string dump_all() const override;
 	virtual std::string dump_regs() const override;
 	virtual std::string dump_callstack() const override;
-	virtual std::vector<u32> dump_callstack_list() const override;
+	virtual std::vector<std::pair<u32, u32>> dump_callstack_list() const override;
 	virtual std::string dump_misc() const override;
 	virtual void cpu_task() override final;
 	virtual void cpu_mem() override;
 	virtual void cpu_unmem() override;
+	virtual void cpu_return() override;
 	virtual ~spu_thread() override;
 	void cpu_init();
-	void cpu_stop();
 
 	static const u32 id_base = 0x02000000; // TODO (used to determine thread type)
 	static const u32 id_step = 1;
 	static const u32 id_count = 2048;
 
-	spu_thread(vm::addr_t ls, lv2_spu_group* group, u32 index, std::string_view name, u32 lv2_id, bool is_isolated = false);
+	spu_thread(vm::addr_t ls, lv2_spu_group* group, u32 index, std::string_view name, u32 lv2_id, bool is_isolated = false, u32 option = 0);
 
 	u32 pc = 0;
 
@@ -625,7 +707,6 @@ public:
 		u32 npc; // SPU Next Program Counter register
 	};
 
-	const bool is_isolated;
 	atomic_t<status_npc_sync_var> status_npc;
 	std::array<spu_int_ctrl_t, 3> int_ctrl; // SPU Class 0, 1, 2 Interrupt Management
 
@@ -635,10 +716,13 @@ public:
 	atomic_t<u32> last_exit_status; // Value to be written in exit_status after checking group termination
 
 	const u32 index; // SPU index
-	const u32 offset; // SPU LS offset
+	const std::add_pointer_t<u8> ls; // SPU LS pointer 
+	const spu_type thread_type;
 private:
+	const u32 offset; // SPU LS offset
 	lv2_spu_group* const group; // SPU Thread Group (only safe to access in the spu thread itself)
 public:
+	const u32 option; // sys_spu_thread_initialize option
 	const u32 lv2_id; // The actual id that is used by syscalls
 
 	// Thread name
@@ -680,16 +764,21 @@ public:
 
 	// Convert specified SPU LS address to a pointer of specified (possibly converted to BE) type
 	template<typename T>
-	inline to_be_t<T>* _ptr(u32 lsa)
+	to_be_t<T>* _ptr(u32 lsa) const
 	{
-		return static_cast<to_be_t<T>*>(vm::base(offset + lsa));
+		return reinterpret_cast<to_be_t<T>*>(ls + lsa);
 	}
 
 	// Convert specified SPU LS address to a reference of specified (possibly converted to BE) type
 	template<typename T>
-	inline to_be_t<T>& _ref(u32 lsa)
+	to_be_t<T>& _ref(u32 lsa) const
 	{
 		return *_ptr<T>(lsa);
+	}
+
+	spu_type get_type() const
+	{
+		return thread_type;
 	}
 
 	bool read_reg(const u32 addr, u32& value);

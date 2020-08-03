@@ -1417,7 +1417,7 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context) no
 			{
 				const auto& spu = static_cast<spu_thread&>(*cpu);
 
-				const u64 type = spu.offset < RAW_SPU_BASE_ADDR ?
+				const u64 type = spu.get_type() == spu_type::threaded ?
 					SYS_MEMORY_PAGE_FAULT_TYPE_SPU_THREAD :
 					SYS_MEMORY_PAGE_FAULT_TYPE_RAW_SPU;
 
@@ -1442,13 +1442,19 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context) no
 				}
 			}
 
+			// Deschedule
+			if (cpu->id_type() == 1)
+			{
+				lv2_obj::sleep(*cpu);
+			}
+
 			// Now, place the page fault event onto table so that other functions [sys_mmapper_free_address and pagefault recovery funcs etc]
 			// know that this thread is page faulted and where.
 
 			auto pf_events = g_fxo->get<page_fault_event_entries>();
 			{
 				std::lock_guard pf_lock(pf_events->pf_mutex);
-				pf_events->events.emplace(static_cast<u32>(data2), addr);
+				pf_events->events.emplace(cpu, addr);
 			}
 
 			sig_log.warning("Page_fault %s location 0x%x because of %s memory", is_writing ? "writing" : "reading",
@@ -1467,38 +1473,32 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context) no
 			// If we fail due to being busy, wait a bit and try again.
 			while (static_cast<u32>(sending_error) == CELL_EBUSY)
 			{
-				if (cpu->id_type() == 1)
+				if (cpu->is_stopped())
 				{
-					lv2_obj::sleep(*cpu, 1000);
+					sending_error = {};
+					break;
 				}
 
 				thread_ctrl::wait_for(1000);
 				sending_error = sys_event_port_send(pf_port_id, data1, data2, data3);
 			}
 
-			if (cpu->id_type() == 1)
-			{
-				// Deschedule
-				lv2_obj::sleep(*cpu);
-			}
-
 			if (sending_error)
 			{
-				vm_log.fatal("Unknown error %x while trying to pass page fault.", +sending_error);
-				cpu->state += cpu_flag::dbg_pause;
+				vm_log.fatal("Unknown error 0x%x while trying to pass page fault.", +sending_error);
 			}
-
-			// Wait until the thread is recovered
-			for (std::shared_lock pf_lock(pf_events->pf_mutex);
-				pf_events->events.count(static_cast<u32>(data2)) && !sending_error;)
+			else
 			{
-				if (cpu->is_stopped())
+				// Wait until the thread is recovered
+				while (!cpu->state.test_and_reset(cpu_flag::signal))
 				{
-					break;
-				}
+					if (cpu->is_stopped())
+					{
+						break;
+					}
 
-				// Timeout in case the emulator is stopping
-				pf_events->cond.wait(pf_lock, 10000);
+					thread_ctrl::wait();
+				}
 			}
 
 			// Reschedule, test cpu state and try recovery if stopped
@@ -1892,6 +1892,7 @@ void thread_base::initialize(void (*error_cb)(), bool(*wait_cb)(const void*))
 
 void thread_base::notify_abort() noexcept
 {
+	m_signal.try_inc();
 	atomic_storage_futex::raw_notify(+m_state_notifier);
 }
 

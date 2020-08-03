@@ -15,8 +15,8 @@ PadHandlerBase::PadHandlerBase(pad_handler type) : m_type(type)
 // Search an unordered map for a string value and return found keycode
 int PadHandlerBase::FindKeyCode(const std::unordered_map<u32, std::string>& map, const cfg::string& name, bool fallback)
 {
-	std::string def = name.def;
-	std::string nam = name.to_string();
+	const std::string def = name.def;
+	const std::string nam = name.to_string();
 	int def_code = -1;
 
 	for (auto it = map.begin(); it != map.end(); ++it)
@@ -40,8 +40,8 @@ int PadHandlerBase::FindKeyCode(const std::unordered_map<u32, std::string>& map,
 
 long PadHandlerBase::FindKeyCode(const std::unordered_map<u64, std::string>& map, const cfg::string& name, bool fallback)
 {
-	std::string def = name.def;
-	std::string nam = name.to_string();
+	const std::string def = name.def;
+	const std::string nam = name.to_string();
 	long def_code = -1;
 
 	for (auto it = map.begin(); it != map.end(); ++it)
@@ -135,7 +135,7 @@ u16 PadHandlerBase::NormalizeTriggerInput(u16 value, int threshold)
 
 // normalizes a directed input, meaning it will correspond to a single "button" and not an axis with two directions
 // the input values must lie in 0+
-u16 PadHandlerBase::NormalizeDirectedInput(s32 raw_value, s32 threshold, s32 maximum)
+u16 PadHandlerBase::NormalizeDirectedInput(s32 raw_value, s32 threshold, s32 maximum) const
 {
 	if (threshold >= maximum || maximum <= 0)
 	{
@@ -155,7 +155,7 @@ u16 PadHandlerBase::NormalizeDirectedInput(s32 raw_value, s32 threshold, s32 max
 	}
 }
 
-u16 PadHandlerBase::NormalizeStickInput(u16 raw_value, int threshold, int multiplier, bool ignore_threshold)
+u16 PadHandlerBase::NormalizeStickInput(u16 raw_value, int threshold, int multiplier, bool ignore_threshold) const
 {
 	const s32 scaled_value = (multiplier * raw_value) / 100;
 
@@ -172,7 +172,7 @@ u16 PadHandlerBase::NormalizeStickInput(u16 raw_value, int threshold, int multip
 // This function normalizes stick deadzone based on the DS3's deadzone, which is ~13%
 // X and Y is expected to be in (-255) to 255 range, deadzone should be in terms of thumb stick range
 // return is new x and y values in 0-255 range
-std::tuple<u16, u16> PadHandlerBase::NormalizeStickDeadzone(s32 inX, s32 inY, u32 deadzone)
+std::tuple<u16, u16> PadHandlerBase::NormalizeStickDeadzone(s32 inX, s32 inY, u32 deadzone) const
 {
 	const float dz_range = deadzone / static_cast<float>(std::abs(thumb_max)); // NOTE: thumb_max should be positive anyway
 
@@ -328,7 +328,11 @@ void PadHandlerBase::get_next_button_press(const std::string& pad_id, const pad_
 
 	const auto status = update_connection(device);
 	if (status == connection::disconnected)
-		return fail_callback(pad_id);
+	{
+		if (fail_callback)
+			fail_callback(pad_id);
+		return;
+	}
 	else if (status == connection::no_data)
 		return;
 
@@ -373,12 +377,27 @@ void PadHandlerBase::get_next_button_press(const std::string& pad_id, const pad_
 	const auto preview_values = get_preview_values(data);
 	const auto battery_level = get_battery_level(pad_id);
 
-	if (pressed_button.first > 0)
-		return callback(pressed_button.first, pressed_button.second, pad_id, battery_level, preview_values);
-	else
-		return callback(0, "", pad_id, battery_level, preview_values);
+	if (callback)
+	{
+		if (pressed_button.first > 0)
+			return callback(pressed_button.first, pressed_button.second, pad_id, battery_level, preview_values);
+		else
+			return callback(0, "", pad_id, battery_level, preview_values);
+	}
 
 	return;
+}
+
+void PadHandlerBase::convert_stick_values(u16& x_out, u16& y_out, const s32& x_in, const s32& y_in, const s32& deadzone, const s32& padsquircling) const
+{
+	// Normalize our stick axis based on the deadzone
+	std::tie(x_out, y_out) = NormalizeStickDeadzone(x_in, y_in, deadzone);
+
+	// Apply pad squircling if necessary
+	if (padsquircling != 0)
+	{
+		std::tie(x_out, y_out) = ConvertToSquirclePoint(x_out, y_out, padsquircling);
+	}
 }
 
 // Update the pad button values based on their type and thresholds. With this you can use axis or triggers as buttons or vice versa
@@ -422,7 +441,7 @@ bool PadHandlerBase::bindPadToDevice(std::shared_ptr<Pad> pad, const std::string
 	if (!pad_device)
 		return false;
 
-	int index = static_cast<int>(bindings.size());
+	const int index = static_cast<int>(bindings.size());
 	m_pad_configs[index].load();
 	pad_device->config = &m_pad_configs[index];
 	pad_config* profile = pad_device->config;
@@ -546,12 +565,12 @@ void PadHandlerBase::get_mapping(const std::shared_ptr<PadDevice>& device, const
 		bool pressed;
 
 		// m_keyCodeMin is the mapped key for left or down
-		u32 key_min = pad->m_sticks[i].m_keyCodeMin;
+		const u32 key_min = pad->m_sticks[i].m_keyCodeMin;
 		u16 val_min = button_values[key_min];
 		TranslateButtonPress(device, key_min, pressed, val_min, true);
 
 		// m_keyCodeMax is the mapped key for right or up
-		u32 key_max = pad->m_sticks[i].m_keyCodeMax;
+		const u32 key_max = pad->m_sticks[i].m_keyCodeMax;
 		u16 val_max = button_values[key_max];
 		TranslateButtonPress(device, key_max, pressed, val_max, true);
 
@@ -561,15 +580,9 @@ void PadHandlerBase::get_mapping(const std::shared_ptr<PadDevice>& device, const
 
 	u16 lx, ly, rx, ry;
 
-	// Normalize our two stick's axis based on the thresholds
-	std::tie(lx, ly) = NormalizeStickDeadzone(stick_val[0], stick_val[1], profile->lstickdeadzone);
-	std::tie(rx, ry) = NormalizeStickDeadzone(stick_val[2], stick_val[3], profile->rstickdeadzone);
-
-	if (profile->padsquircling != 0)
-	{
-		std::tie(lx, ly) = ConvertToSquirclePoint(lx, ly, profile->padsquircling);
-		std::tie(rx, ry) = ConvertToSquirclePoint(rx, ry, profile->padsquircling);
-	}
+	// Normalize and apply pad squircling
+	convert_stick_values(lx, ly, stick_val[0], stick_val[1], profile->lstickdeadzone, profile->lpadsquircling);
+	convert_stick_values(rx, ry, stick_val[2], stick_val[3], profile->rstickdeadzone, profile->rpadsquircling);
 
 	if (m_type == pad_handler::ds4)
 	{

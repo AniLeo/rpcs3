@@ -45,7 +45,7 @@ public:
 		const QString audio_out_linux           = tr("OpenAL uses a cross-platform approach and supports audio buffering, so it is the recommended option.\nPulseAudio uses the native Linux sound system, and is the next best alternative. If neither are available, ALSA can be used instead.");
 		const QString audio_dump                = tr("Saves all audio as a raw wave file. If unsure, leave this unchecked.");
 		const QString convert                   = tr("Uses 16-bit audio samples instead of default 32-bit floating point.\nUse with buggy audio drivers if you have no sound or completely broken sound.");
-		const QString downmix                   = tr("Uses stereo audio output instead of default 7.1 surround sound.\nUse with stereo audio devices. Disable it only if you are using a surround sound audio system.");
+		const QString downmix                   = tr("Uses chosen audio output instead of default 7.1 surround sound.\nUse downmix to stereo with stereo audio devices. Use 5.1 or higher only if you are using a surround sound audio system.");
 		const QString master_volume             = tr("Controls the overall volume of the emulation.\nValues above 100% might reduce the audio quality.");
 		const QString enable_buffering          = tr("Enables audio buffering, which reduces crackle/stutter but increases audio latency (requires XAudio2 or OpenAL).");
 		const QString audio_buffer_duration     = tr("Target buffer duration in milliseconds.\nHigher values make the buffering algorithm's job easier, but may introduce noticeable audio latency.");
@@ -93,6 +93,8 @@ public:
 		const QString disable_fifo_reordering      = tr("Disables RSX FIFO optimizations completely. Draws are processed as they are received by the DMA puller.");
 		const QString gpu_texture_scaling          = tr("Force all texture transfer, scaling and conversion operations on the GPU.\nMay cause texture corruption in some cases.");
 		const QString strict_texture_flushing      = tr("Forces texture flushing even in situations where it is not necessary/correct. Known to cause visual artifacts, but useful for debugging certain texture cache issues.");
+		const QString disable_native_fp16          = tr("Disables hardware half-float support which is known to cause problems in some rare cases on some GPUs.");
+		const QString enable_3d                    = tr("Enables 3D stereo rendering.\nNote that only anaglyph viewing is supported at the moment.");
 
 		// emulator
 
@@ -161,7 +163,7 @@ public:
 		const QString show_boot_game     = tr("Shows a confirmation dialog when a game was booted while another game is running.");
 		const QString show_pkg_install   = tr("Shows a dialog when packages were installed successfully.");
 		const QString show_pup_install   = tr("Shows a dialog when firmware was installed successfully.");
-		const QString check_update_start = tr("Check if an update is available on startup.");
+		const QString check_update_start = tr("Checks if an update is available on startup and asks if you want to update.\nIf \"Background\" is selected, the check is done silently in the background and a new download option is shown in the top right corner of the menu if a new version was found.");
 		const QString use_rich_presence  = tr("Enables use of Discord Rich Presence to show what game you are playing on Discord.\nRequires a restart of RPCS3 to completely close the connection.");
 		const QString discord_state      = tr("Tell your friends what you are doing.");
 		const QString custom_colors      = tr("Prioritize custom user interface colors over properties set in stylesheet.");
@@ -197,15 +199,26 @@ public:
 	{
 		const QString null        = tr("This controller is disabled and will appear as disconnected to software. Choose another handler to enable it.");
 		const QString ldd_pad     = tr("This port is currently assigned to a custom controller by the application and can't be changed.");
-		const QString keyboard    = tr("While it is possible to use a keyboard as a pad in RPCS3, the use of an actual controller is strongly recommended.\nTo bind mouse movement to a button or joystick, click on the desired button to activate it, then click and hold while dragging the mouse to a direction.");
-		const QString ds3_windows = tr("In order to use the DualShock 3 handler, you need to install the official DualShock 3 driver first.\nSee the <a href=\"https://wiki.rpcs3.net/index.php?title=Help:Controller_Configuration\">RPCS3 Wiki</a> for instructions.");
+		const QString keyboard    = tr("While it is possible to use a keyboard as a pad in RPCS3, the use of an actual controller is strongly recommended.<br>To bind mouse movement to a button or joystick, click on the desired button to activate it, then click and hold while dragging the mouse to a direction.");
+		const QString ds3_windows = tr("In order to use the DualShock 3 handler, you need to install the official DualShock 3 driver first.<br>See the <a href=\"https://wiki.rpcs3.net/index.php?title=Help:Controller_Configuration\">RPCS3 Wiki</a> for instructions.");
 		const QString ds3_linux   = tr("In order to use the DualShock 3 handler, you might need to add udev rules to let RPCS3 access the controller.\nSee the <a href=\"https://wiki.rpcs3.net/index.php?title=Help:Controller_Configuration\">RPCS3 Wiki</a> for instructions.");
 		const QString ds3_other   = tr("The DualShock 3 handler is recommended for official DualShock 3 controllers.");
 		const QString ds4_windows = tr("If you have any issues with the DualShock 4 handler, it might be caused by third-party tools such as DS4Windows. It's recommended that you disable them while using this handler.");
 		const QString ds4_linux   = tr("In order to use the DualShock 4 handler, you might need to add udev rules to let RPCS3 access the controller.\nSee the <a href=\"https://wiki.rpcs3.net/index.php?title=Help:Controller_Configuration\">RPCS3 Wiki</a> for instructions.");
 		const QString ds4_other   = tr("The DualShock 4 handler is recommended for official DualShock 4 controllers.");
 		const QString xinput      = tr("The XInput handler will work with Xbox controllers and many third-party PC-compatible controllers. Pressure sensitive buttons from SCP are supported when SCP's XInput1_3.dll is placed in the main RPCS3 directory. For more details, see the <a href=\"https://wiki.rpcs3.net/index.php?title=Help:Controller_Configuration\">RPCS3 Wiki</a>.");
-		const QString evdev       = tr("The evdev handler should work with any controller that has linux support.\nIf your joystick is not being centered properly, read the <a href=\"https://wiki.rpcs3.net/index.php?title=Help:Controller_Configuration\">RPCS3 Wiki</a> for instructions.");
+		const QString evdev       = tr("The evdev handler should work with any controller that has linux support.<br>If your joystick is not being centered properly, read the <a href=\"https://wiki.rpcs3.net/index.php?title=Help:Controller_Configuration\">RPCS3 Wiki</a> for instructions.");
 		const QString mmjoy       = tr("The MMJoystick handler should work with almost any controller recognized by Windows. However, it is recommended that you use the more specific handlers if you have a controller that supports them.");
+
+		const QString squircle_factor    = tr("The actual DualShock 3's stick range is not circular but formed like a rounded square (or squircle) which represents the maximum range of the emulated sticks. You can use the squircle values to modify the stick input if your sticks can't reach the corners of that range. A value of 0 does not apply any so called squircling. A value of 8000 is usually recommended.");
+		const QString stick_multiplier   = tr("The stick multipliers can be used to change the sensitivity of your stick movements.<br>The default setting is 1 and represents normal input.");
+		const QString stick_deadzones    = tr("A stick's deadzone determines how far the stick has to be moved until it is fully recognized by the game. The resulting range will be projected onto the full input range in order to give you a smooth experience. Movement inside the deadzone is actually simulated as a real DualShock 3's deadzone of ~13%, so don't worry if there is still movement shown in the emulated stick preview.");
+		const QString vibration          = tr("The PS3 activates two motors (large and small) to handle controller vibrations.<br>You can enable, disable or even switch these signals for the currently selected pad here.");
+		const QString emulated_preview   = tr("The emulated stick values (red dots) in the stick preview represent the actual stick positions as they will be visible to the game. The actual DualShock 3's stick range is not circular but formed like a rounded square (or squircle) which represents the maximum range of the emulated sticks. The blue regular dots represent the raw stick values (including stick multipliers) before they are converted for ingame usage.");
+		const QString trigger_deadzones  = tr("A trigger's deadzone determines how far the trigger has to be moved until it is recognized by the game. The resulting range will be projected onto the full input range in order to give you a smooth experience.");
+		const QString stick_lerp         = tr("With keyboards you are inevitably restricted to 8 stick directions (4 straight + 4 diagonal). Furthermore when a key is pressed the stick will jump to the maximum value of the chosen direction immediately. The stick interpolation can be used to work-around both of these issues by smoothening out these directional changes. The lower the value, the longer you have to press or release a key until the maximum amplitude is reached.");
+		const QString mouse_deadzones    = tr("The mouse deadzones represent the games' own deadzones on the x and y axes. Games usually enforce their own deadzones to filter out small unwanted stick movements. In consequence mouse input feels unintuitive since it relies on immediate responsiveness. You can change these values temporarily during gameplay in order to find out the optimal values for your game (Alt+T and Alt+Y for x, Alt+U and Alt+I for y).");
+		const QString mouse_acceleration = tr("The mouse acceleration can be used to amplify your mouse movements on the x and y axes. Increase these values if your mouse movements feel too slow while playing a game. You can change these values temporarily during gameplay in order to find out the optimal values (Alt+G and Alt+H for x, Alt+J and Alt+K for y). Keep in mind that modern mice usually provide different modes and settings that can be used to change mouse movement speeds as well.");
+
 	} gamepad_settings;
 };

@@ -97,18 +97,18 @@ public:
 
 	// Find and remove the object from the container (deque or vector)
 	template <typename T, typename E>
-	static bool unqueue(std::deque<T*>& queue, const E& object)
+	static T* unqueue(std::deque<T*>& queue, E* object)
 	{
 		for (auto found = queue.cbegin(), end = queue.cend(); found != end; found++)
 		{
 			if (*found == object)
 			{
 				queue.erase(found);
-				return true;
+				return static_cast<T*>(object);
 			}
 		}
 
-		return false;
+		return nullptr;
 	}
 
 	template <typename E, typename T>
@@ -162,6 +162,7 @@ public:
 
 	static inline bool awake(cpu_thread* const thread, s32 prio = enqueue_cmd)
 	{
+		vm::temporary_unlock();
 		std::lock_guard lock(g_mutex);
 		return awake_unlocked(thread, prio);
 	}

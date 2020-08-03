@@ -106,11 +106,9 @@ namespace gui
 	const QString fs           = "FileSystem";
 	const QString gs_frame     = "GSFrame";
 	const QString trophy       = "Trophy";
-	const QString savedata     = "SaveData";
-	const QString users        = "Users";
-	const QString notes        = "Notes";
-	const QString titles       = "Titles";
+	const QString patches      = "Patches";
 	const QString localization = "Localization";
+	const QString pad_settings = "PadSettings";
 
 	const QColor gl_icon_color = QColor(240, 240, 240, 255);
 
@@ -184,7 +182,7 @@ namespace gui
 
 	const gui_save m_currentConfig     = gui_save(meta, "currentConfig",     Settings);
 	const gui_save m_currentStylesheet = gui_save(meta, "currentStylesheet", Default);
-	const gui_save m_saveNotes         = gui_save(meta, "saveNotes",         QVariantMap());
+	const gui_save m_saveNotes         = gui_save(meta, "saveNotes",         QVariantMap()); // Deprecated
 	const gui_save m_showDebugTab      = gui_save(meta, "showDebugTab",      false);
 	const gui_save m_enableUIColors    = gui_save(meta, "enableUIColors",    false);
 	const gui_save m_richPresence      = gui_save(meta, "useRichPresence",   true);
@@ -213,14 +211,20 @@ namespace gui
 	const gui_save tr_games_state   = gui_save(trophy, "games_state",   QByteArray());
 	const gui_save tr_trophy_state  = gui_save(trophy, "trophy_state",  QByteArray());
 
+	const gui_save pm_show_owned     = gui_save(patches, "show_owned",     false);
+	const gui_save pm_geometry       = gui_save(patches, "geometry",       QByteArray());
+	const gui_save pm_splitter_state = gui_save(patches, "splitter_state", QByteArray());
+
 	const gui_save sd_geometry   = gui_save(savedata, "geometry",   QByteArray());
 	const gui_save sd_icon_size  = gui_save(savedata, "icon_size",  60);
 	const gui_save sd_icon_color = gui_save(savedata, "icon_color", gl_icon_color);
 
 	const gui_save um_geometry    = gui_save(users, "geometry",    QByteArray());
-	const gui_save um_active_user = gui_save(users, "active_user", "00000001");
+	const gui_save um_active_user = gui_save(users, "active_user", ""); // Deprecated
 
 	const gui_save loc_language = gui_save(localization, "language", "en");
+
+	const gui_save pads_show_emulated = gui_save(pad_settings, "show_emulated_values", false);
 }
 
 /** Class for GUI settings..
@@ -231,8 +235,6 @@ class gui_settings : public settings
 
 public:
 	explicit gui_settings(QObject* parent = nullptr);
-
-	QString GetCurrentUser();
 
 	/** Changes the settings file to the destination preset*/
 	bool ChangeToConfig(const QString& config_name);

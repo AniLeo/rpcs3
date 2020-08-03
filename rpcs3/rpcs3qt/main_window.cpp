@@ -66,10 +66,13 @@ main_window::main_window(std::shared_ptr<gui_settings> gui_settings, std::shared
 
 	// We have to setup the ui before using a translation
 	ui->setupUi(this);
+
+	setAttribute(Qt::WA_DeleteOnClose);
 }
 
 main_window::~main_window()
 {
+	SaveWindowState();
 	delete ui;
 }
 
@@ -176,10 +179,49 @@ void main_window::Init()
 	// Fix possible hidden game list columns. The game list has to be visible already. Use this after show()
 	m_game_list_frame->FixNarrowColumns();
 
-#if defined(_WIN32) || defined(__linux__)
-	if (m_gui_settings->GetValue(gui::m_check_upd_start).toBool())
+	// RPCS3 Updater
+
+	QMenu* download_menu = new QMenu(tr("Update Available!"));
+
+	QAction *download_action = new QAction(tr("Download Update"), download_menu);
+	connect(download_action, &QAction::triggered, this, [this]
 	{
-		m_updater.check_for_updates(true, this);
+		m_updater.update();
+	});
+
+	download_menu->addAction(download_action);
+
+#ifdef _WIN32
+	// Use a menu at the top right corner to indicate the new version.
+	QMenuBar *corner_bar = new QMenuBar(ui->menuBar);
+	m_download_menu_action = corner_bar->addMenu(download_menu);
+	ui->menuBar->setCornerWidget(corner_bar);
+	ui->menuBar->cornerWidget()->setVisible(false);
+#else
+	// Append a menu to the right of the regular menus to indicate the new version.
+	// Some distros just can't handle corner widgets at the moment.
+	m_download_menu_action = ui->menuBar->addMenu(download_menu);
+#endif
+
+	ASSERT(m_download_menu_action);
+	m_download_menu_action->setVisible(false);
+
+	connect(&m_updater, &update_manager::signal_update_available, this, [this](bool update_available)
+	{
+		if (m_download_menu_action)
+		{
+			m_download_menu_action->setVisible(update_available);
+		}
+		if (ui->menuBar && ui->menuBar->cornerWidget())
+		{
+			ui->menuBar->cornerWidget()->setVisible(update_available);
+		}
+	});
+
+#if defined(_WIN32) || defined(__linux__)
+	if (const auto update_value = m_gui_settings->GetValue(gui::m_check_upd_start).toString(); update_value != "false")
+	{
+		m_updater.check_for_updates(true, update_value != "true", this);
 	}
 #endif
 }
@@ -639,14 +681,14 @@ void main_window::HandlePupInstallation(QString file_path)
 	if (!pup_f)
 	{
 		gui_log.error("Error opening PUP file %s", path);
-		QMessageBox::critical(this, tr("Failure!"), tr("The selected firmware file couldn't be opened."));
+		QMessageBox::critical(this, tr("Firmware Installation Failed"), tr("Firmware installation failed: The selected firmware file couldn't be opened."));
 		return;
 	}
 
 	if (pup_f.size() < sizeof(PUPHeader))
 	{
 		gui_log.error("Too small PUP file: %llu", pup_f.size());
-		QMessageBox::critical(this, tr("Failure!"), tr("Error while installing firmware: PUP file size is invalid."));
+		QMessageBox::critical(this, tr("Firmware Installation Failed"), tr("Firmware installation failed: The provided file is empty."));
 		return;
 	}
 
@@ -656,8 +698,8 @@ void main_window::HandlePupInstallation(QString file_path)
 
 	if (header.header_length + header.data_length != pup_f.size())
 	{
-		gui_log.error("Firmware size mismatch, expected: %llu, actual: %llu + %llu", pup_f.size(), header.header_length, header.data_length);
-		QMessageBox::critical(this, tr("Failure!"), tr("Error while installing firmware: PUP file is corrupted."));
+		gui_log.error("Firmware size mismatch, expected: %llu + %llu, actual: %llu", header.header_length, header.data_length, pup_f.size());
+		QMessageBox::critical(this, tr("Firmware Installation Failed"), tr("Firmware installation failed: The provided file is incomplete. Try redownloading it."));
 		return;
 	}
 
@@ -665,14 +707,14 @@ void main_window::HandlePupInstallation(QString file_path)
 	if (!pup)
 	{
 		gui_log.error("Error while installing firmware: PUP file is invalid.");
-		QMessageBox::critical(this, tr("Failure!"), tr("Error while installing firmware: PUP file is invalid."));
+		QMessageBox::critical(this, tr("Firmware Installation Failed"), tr("Firmware installation failed: The provided file is corrupted."));
 		return;
 	}
 
 	if (!pup.validate_hashes())
 	{
-		gui_log.error("Error while installing firmware: Hash check failed. ");
-		QMessageBox::critical(this, tr("Failure!"), tr("Error while installing firmware: PUP file contents are invalid."));
+		gui_log.error("Error while installing firmware: Hash check failed.");
+		QMessageBox::critical(this, tr("Firmware Installation Failed"), tr("Firmware installation failed: The provided file's contents are corrupted."));
 		return;
 	}
 
@@ -724,7 +766,7 @@ void main_window::HandlePupInstallation(QString file_path)
 				if (dev_flash_tar_f.size() < 3)
 				{
 					gui_log.error("Error while installing firmware: PUP contents are invalid.");
-					QMessageBox::critical(this, tr("Failure!"), tr("Error while installing firmware: PUP contents are invalid."));
+					QMessageBox::critical(this, tr("Firmware Installation Failed"), tr("Firmware installation failed: Firmware could not be decompressed"));
 					progress = -1;
 				}
 
@@ -732,7 +774,7 @@ void main_window::HandlePupInstallation(QString file_path)
 				if (!dev_flash_tar.extract(g_cfg.vfs.get_dev_flash(), "dev_flash/"))
 				{
 					gui_log.error("Error while installing firmware: TAR contents are invalid.");
-					QMessageBox::critical(this, tr("Failure!"), tr("Error while installing firmware: TAR contents are invalid."));
+					QMessageBox::critical(this, tr("Firmware Installation Failed"), tr("Firmware installation failed: Firmware contents could not be extracted."));
 					progress = -1;
 				}
 
@@ -1212,7 +1254,7 @@ QAction* main_window::CreateRecentAction(const q_string_pair& entry, const uint&
 	}
 
 	// connect boot
-	connect(act, &QAction::triggered, [=, this]() {BootRecentAction(act); });
+	connect(act, &QAction::triggered, [act, this]() {BootRecentAction(act); });
 
 	return act;
 }
@@ -1488,24 +1530,8 @@ void main_window::CreateConnects()
 
 	auto open_pad_settings = [this]
 	{
-		if (!Emu.IsStopped())
-		{
-			Emu.GetCallbacks().enable_pads(false);
-		}
-		pad_settings_dialog dlg(this);
-		connect(&dlg, &QDialog::finished, [this](int/* result*/)
-		{
-			if (Emu.IsStopped())
-			{
-				return;
-			}
-			Emu.GetCallbacks().reset_pads(Emu.GetTitleID());
-		});
+		pad_settings_dialog dlg(m_gui_settings, this);
 		dlg.exec();
-		if (!Emu.IsStopped())
-		{
-			Emu.GetCallbacks().enable_pads(true);
-		}
 	};
 
 	connect(ui->confPadsAct, &QAction::triggered, open_pad_settings);
@@ -1525,7 +1551,7 @@ void main_window::CreateConnects()
 
 	connect(ui->confSavedataManagerAct, &QAction::triggered, [this]
 	{
-		save_manager_dialog* save_manager = new save_manager_dialog(m_gui_settings);
+		save_manager_dialog* save_manager = new save_manager_dialog(m_gui_settings, m_persistent_settings);
 		connect(this, &main_window::RequestTrophyManagerRepaint, save_manager, &save_manager_dialog::HandleRepaintUiRequest);
 		save_manager->show();
 	});
@@ -1551,13 +1577,24 @@ void main_window::CreateConnects()
 
 	connect(ui->actionManage_Game_Patches, &QAction::triggered, [this]
 	{
-		patch_manager_dialog patch_manager(this);
+		std::unordered_map<std::string, std::set<std::string>> games;
+		if (m_game_list_frame)
+		{
+			for (const auto& game : m_game_list_frame->GetGameInfo())
+			{
+				if (game)
+				{
+					games[game->info.serial].insert(game_list_frame::GetGameVersion(game));
+				}
+			}
+		}
+		patch_manager_dialog patch_manager(m_gui_settings, games, this);
 		patch_manager.exec();
  	});
 
 	connect(ui->actionManage_Users, &QAction::triggered, [this]
 	{
-		user_manager_dialog user_manager(m_gui_settings, this);
+		user_manager_dialog user_manager(m_gui_settings, m_persistent_settings, this);
 		user_manager.exec();
 		m_game_list_frame->Refresh(true); // New user may have different games unlocked.
 	});
@@ -1680,7 +1717,7 @@ void main_window::CreateConnects()
 			QMessageBox::warning(this, tr("Auto-updater"), tr("Please stop the emulation before trying to update."));
 			return;
 		}
-		m_updater.check_for_updates(false, this);
+		m_updater.check_for_updates(false, false, this);
 	});
 
 	connect(ui->aboutAct, &QAction::triggered, [this]
@@ -2118,7 +2155,7 @@ void main_window::mouseDoubleClickEvent(QMouseEvent *event)
 	}
 }
 
-/** Override the Qt close event to have the emulator stop and the application die.  May add a warning dialog in future.
+/** Override the Qt close event to have the emulator stop and the application die.
 */
 void main_window::closeEvent(QCloseEvent* closeEvent)
 {
@@ -2128,17 +2165,8 @@ void main_window::closeEvent(QCloseEvent* closeEvent)
 		return;
 	}
 
-	// Cleanly stop the emulator.
-	Emu.Stop();
-
-	SaveWindowState();
-
-	// I need the gui settings to sync, and that means having the destructor called as guiSetting's parent is main_window.
-	setAttribute(Qt::WA_DeleteOnClose);
-	QMainWindow::close();
-
-	// It's possible to have other windows open, like games.  So, force the application to die.
-	QApplication::quit();
+	// Cleanly stop and quit the emulator.
+	Emu.Quit(true);
 }
 
 /**

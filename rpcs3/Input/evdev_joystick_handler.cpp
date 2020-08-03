@@ -84,7 +84,8 @@ void evdev_joystick_handler::init_config(pad_config* cfg, const std::string& nam
 	cfg->rstickdeadzone.def    = 30; // between 0 and 255
 	cfg->ltriggerthreshold.def = 0;  // between 0 and 255
 	cfg->rtriggerthreshold.def = 0;  // between 0 and 255
-	cfg->padsquircling.def     = 5000;
+	cfg->lpadsquircling.def    = 5000;
+	cfg->rpadsquircling.def    = 5000;
 
 	// apply defaults
 	cfg->from_default();
@@ -281,7 +282,11 @@ void evdev_joystick_handler::get_next_button_press(const std::string& padId, con
 	// Get our evdev device
 	auto device = get_evdev_device(padId);
 	if (!device || device->device == nullptr)
-		return fail_callback(padId);
+	{
+		if (fail_callback)
+			fail_callback(padId);
+		return;
+	}
 	libevdev* dev = device->device;
 
 	// Try to query the latest event from the joystick.
@@ -320,7 +325,11 @@ void evdev_joystick_handler::get_next_button_press(const std::string& padId, con
 
 	// return if nothing new has happened. ignore this to get the current state for blacklist
 	if (!get_blacklist && ret < 0)
-		return callback(0, "", padId, 0, preview_values);
+	{
+		if (callback)
+			callback(0, "", padId, 0, preview_values);
+		return;
+	}
 
 	std::pair<u16, std::string> pressed_button = { 0, "" };
 
@@ -401,10 +410,13 @@ void evdev_joystick_handler::get_next_button_press(const std::string& padId, con
 		return;
 	}
 
-	if (pressed_button.first > 0)
-		return callback(pressed_button.first, pressed_button.second, padId, 0, preview_values);
-	else
-		return callback(0, "", padId, 0, preview_values);
+	if (callback)
+	{
+		if (pressed_button.first > 0)
+			return callback(pressed_button.first, pressed_button.second, padId, 0, preview_values);
+		else
+			return callback(0, "", padId, 0, preview_values);
+	}
 }
 
 // https://github.com/dolphin-emu/dolphin/blob/master/Source/Core/InputCommon/ControllerInterface/evdev/evdev.cpp
@@ -819,18 +831,11 @@ void evdev_joystick_handler::get_mapping(const std::shared_ptr<PadDevice>& devic
 
 	const auto profile = m_dev->config;
 
-	// Normalize our two stick's axis based on the thresholds
 	u16 lx, ly, rx, ry;
 
-	// Normalize our two stick's axis based on the thresholds
-	std::tie(lx, ly) = NormalizeStickDeadzone(m_dev->stick_val[0], m_dev->stick_val[1], profile->lstickdeadzone);
-	std::tie(rx, ry) = NormalizeStickDeadzone(m_dev->stick_val[2], m_dev->stick_val[3], profile->rstickdeadzone);
-
-	if (profile->padsquircling != 0)
-	{
-		std::tie(lx, ly) = ConvertToSquirclePoint(lx, ly, profile->padsquircling);
-		std::tie(rx, ry) = ConvertToSquirclePoint(rx, ry, profile->padsquircling);
-	}
+	// Normalize and apply pad squircling
+	convert_stick_values(lx, ly, m_dev->stick_val[0], m_dev->stick_val[1], profile->lstickdeadzone, profile->lpadsquircling);
+	convert_stick_values(rx, ry, m_dev->stick_val[2], m_dev->stick_val[3], profile->rstickdeadzone, profile->rpadsquircling);
 
 	pad->m_sticks[0].m_value = lx;
 	pad->m_sticks[1].m_value = 255 - ly;
