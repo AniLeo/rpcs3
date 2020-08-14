@@ -4,6 +4,8 @@
 #include "../RSXThread.h"
 #include "../rsx_utils.h"
 
+#include <span>
+
 namespace rsx
 {
 	void typeless_xfer::analyse()

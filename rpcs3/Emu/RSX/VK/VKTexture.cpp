@@ -8,6 +8,8 @@
 #include "VKCompute.h"
 #include "VKRenderPass.h"
 
+#include <span>
+
 namespace vk
 {
 	VkComponentMapping default_component_map()
