@@ -5,6 +5,7 @@
 #include <variant>
 #include <stack>
 #include <atomic>
+#include <span>
 
 #include "GCM.h"
 #include "rsx_cache.h"

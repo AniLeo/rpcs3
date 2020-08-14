@@ -7,11 +7,11 @@
 #include <stdio.h>
 #include <time.h>
 #include "Utilities/StrUtil.h"
-#include "Utilities/span.h"
 
 #include <memory>
 #include <string>
 #include <string_view>
+#include <span>
 
 // Auxiliary functions (endian swap, xor).
 
@@ -129,7 +129,7 @@ char* extract_file_name(const char* file_path, char real_file_name[MAX_PATH])
 		v.remove_prefix(pos + 1);
 	}
 
-	gsl::span r(real_file_name, MAX_PATH);
+	std::span r(real_file_name, MAX_PATH);
 	strcpy_trunc(r, v);
 	return real_file_name;
 }

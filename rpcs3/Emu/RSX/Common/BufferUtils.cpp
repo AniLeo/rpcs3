@@ -5,6 +5,7 @@
 #include "../RSXThread.h"
 
 #include <limits>
+#include <span>
 
 #define DEBUG_VERTEX_STREAMING 0
 
