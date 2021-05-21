@@ -41,6 +41,9 @@ struct lv2_lwcond final : lv2_obj
 		, control(control)
 	{
 	}
+
+	lv2_lwcond(cereal_load& ar);
+	void save(cereal_save& ar);
 };
 
 // Aux

@@ -459,6 +459,12 @@ public:
 			*this = value;
 			return result;
 		}
+
+		template <class Archive>
+		void serialize(Archive& ar)
+		{
+			ar(m_data);
+		}
 	};
 }
 

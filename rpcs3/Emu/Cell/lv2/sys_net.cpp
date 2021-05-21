@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "sys_net.h"
 
 #include "Emu/IdManager.h"
@@ -1380,11 +1380,6 @@ error_code sys_net_bnet_accept(ppu_thread& ppu, s32 s, vm::ptr<sys_net_sockaddr>
 		return not_an_error(p2ps_result);
 	}
 
-	if (ppu.is_stopped())
-	{
-		return {};
-	}
-
 	auto newsock = std::make_shared<lv2_socket>(native_socket, 0, 0);
 
 	result = idm::import_existing<lv2_socket>(newsock);
@@ -2486,11 +2481,6 @@ error_code sys_net_bnet_recvfrom(ppu_thread& ppu, s32 s, vm::ptr<void> buf, u32 
 		}
 
 		std::memcpy(buf.get_ptr(), _buf.data(), len);
-	}
-
-	if (ppu.is_stopped())
-	{
-		return {};
 	}
 
 	// addr is set earlier for P2P socket

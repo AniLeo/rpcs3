@@ -256,7 +256,10 @@ static void ppu_initialize_modules(ppu_linkage_info* link)
 	u32& hle_funcs_addr = g_fxo->get<ppu_function_manager>().addr;
 
 	// Allocate memory for the array (must be called after fixed allocations)
-	hle_funcs_addr = vm::alloc(::size32(hle_funcs) * 8, vm::main);
+	if (!hle_funcs_addr)
+		hle_funcs_addr = vm::alloc(::size32(hle_funcs) * 8, vm::main);
+	else
+		vm::page_protect(hle_funcs_addr, utils::align(::size32(hle_funcs) * 8, 0x1000), 0, vm::page_writable);
 
 	// Initialize as PPU executable code
 	ppu_register_range(hle_funcs_addr, ::size32(hle_funcs) * 8);
@@ -814,6 +817,7 @@ static void ppu_check_patch_spu_images(const ppu_segment& seg)
 
 void try_spawn_ppu_if_exclusive_program(const ppu_module& m)
 {
+	return;
 	// If only PRX/OVL has been loaded at Emu.BootGame(), launch a single PPU thread so its memory can be viewed
 	if (Emu.IsReady() && g_fxo->get<ppu_module>().segs.empty())
 	{
@@ -832,7 +836,7 @@ void try_spawn_ppu_if_exclusive_program(const ppu_module& m)
 	}
 }
 
-std::shared_ptr<lv2_prx> ppu_load_prx(const ppu_prx_object& elf, const std::string& path, s64 file_offset)
+std::shared_ptr<lv2_prx> ppu_load_prx(const ppu_prx_object& elf, const std::string& path, s64 file_offset, cereal_load* ar)
 {
 	if (elf != elf_error::ok)
 	{
@@ -840,7 +844,7 @@ std::shared_ptr<lv2_prx> ppu_load_prx(const ppu_prx_object& elf, const std::stri
 	}
 
 	// Create new PRX object
-	const auto prx = idm::make_ptr<lv2_obj, lv2_prx>();
+	const auto prx = !ar ? idm::make_ptr<lv2_obj, lv2_prx>() : std::make_shared<lv2_prx>();
 
 	// Access linkage information object
 	auto& link = g_fxo->get<ppu_linkage_info>();
@@ -878,15 +882,16 @@ std::shared_ptr<lv2_prx> ppu_load_prx(const ppu_prx_object& elf, const std::stri
 				//const u32 init_addr = ::narrow<u32>(prog.p_vaddr);
 
 				// Alloc segment memory
-				const u32 addr = vm::alloc(mem_size, vm::main);
+				// Or use saved address
+				const u32 addr = !ar ? vm::alloc(mem_size, vm::main) : ar->operator u32();
 
-				if (!addr)
+				if (!vm::check_addr(addr))
 				{
 					fmt::throw_exception("vm::alloc() failed (size=0x%x)", mem_size);
 				}
 
 				// Copy segment data
-				std::memcpy(vm::base(addr), prog.bin.data(), file_size);
+				if (!ar) std::memcpy(vm::base(addr), prog.bin.data(), file_size);
 				ppu_loader.warning("**** Loaded to 0x%x...0x%x (size=0x%x)", addr, addr + mem_size - 1, mem_size);
 
 				// Hash segment
@@ -988,6 +993,11 @@ std::shared_ptr<lv2_prx> ppu_load_prx(const ppu_prx_object& elf, const std::stri
 				const u32 rtype = _rel.type = rel.type;
 				const u64 rdata = _rel.data = data_base + rel.ptr.addr();
 				prx->relocs.emplace_back(_rel);
+
+				if (ar)
+				{
+					break;
+				}
 
 				switch (rtype)
 				{
@@ -1198,7 +1208,7 @@ void ppu_unload_prx(const lv2_prx& prx)
 	}
 }
 
-bool ppu_load_exec(const ppu_exec_object& elf)
+bool ppu_load_exec(const ppu_exec_object& elf, cereal_load* ar)
 {
 	if (elf != elf_error::ok)
 	{
@@ -1222,7 +1232,13 @@ bool ppu_load_exec(const ppu_exec_object& elf)
 	}
 
 	g_fxo->need<ppu_linkage_info>();
-	g_fxo->need<ppu_function_manager>();
+
+	if (ar)
+	{
+		ensure(vm::check_addr(g_fxo->init<ppu_function_manager>(*ar)->addr));
+	}
+	else
+		g_fxo->init<ppu_function_manager>();
 
 	// Set for delayed initialization in ppu_initialize()
 	auto& _main = g_fxo->get<ppu_module>();
@@ -1295,7 +1311,15 @@ bool ppu_load_exec(const ppu_exec_object& elf)
 				return false;
 			}
 
-			if (!vm::falloc(addr, size, vm::main))
+			if (ar)
+			{
+				if (!vm::check_addr(addr, vm::page_readable, size))
+				{
+					ppu_loader.fatal("ppu_load_exec(): Archived PPU executable memory has not been found! (addr=0x%x, memsz=0x%x)", addr, size); // TODO
+					return false;
+				}
+			}
+			else if (!vm::falloc(addr, size, vm::main))
 			{
 				ppu_loader.error("vm::falloc(vm::main) failed (addr=0x%x, memsz=0x%x)", addr, size); // TODO
 
@@ -1307,7 +1331,18 @@ bool ppu_load_exec(const ppu_exec_object& elf)
 			}
 
 			// Copy segment data, hash it
-			std::memcpy(vm::base(addr), prog.bin.data(), prog.bin.size());
+			if (!ar)
+			{
+				std::memcpy(vm::base(addr), prog.bin.data(), prog.bin.size());
+			}
+			else
+			{
+				// For backwards compatibility: already loaded memory will always be writable
+				const u32 size0 = utils::align(size + addr % 0x10000, 0x10000);
+				const u32 addr0 = addr & -0x10000;
+				vm::page_protect(addr0, size0, 0, vm::page_writable | vm::page_readable, vm::page_executable);
+			}
+
 			sha1_update(&sha, reinterpret_cast<const uchar*>(&prog.p_vaddr), sizeof(prog.p_vaddr));
 			sha1_update(&sha, reinterpret_cast<const uchar*>(&prog.p_memsz), sizeof(prog.p_memsz));
 			sha1_update(&sha, prog.bin.data(), prog.bin.size());
@@ -1544,6 +1579,59 @@ bool ppu_load_exec(const ppu_exec_object& elf)
 		}
 	}
 
+	// Initialize memory stats (according to sdk version)
+	u32 mem_size = 0xC800000;
+
+	if (sdk_version > 0x0021FFFF)
+	{
+		mem_size = 0xD500000;
+	}
+	else if (sdk_version > 0x00192FFF)
+	{
+		mem_size = 0xD300000;
+	}
+	else if (sdk_version > 0x0018FFFF)
+	{
+		mem_size = 0xD100000;
+	}
+	else if (sdk_version > 0x0017FFFF)
+	{
+		mem_size = 0xD000000;
+	}
+	else if (sdk_version > 0x00154FFF)
+	{
+		mem_size = 0xCC00000;
+	}
+
+	if (g_cfg.core.debug_console_mode)
+	{
+		// TODO: Check for all sdk versions
+		mem_size += 0xC000000;
+	}
+
+	if (g_ps3_process_info.get_cellos_appname() == "vsh.self"sv)
+	{
+		// Because vsh.self comes before any generic application, more memory is available to it
+		// This is an estimation though (TODO)
+		mem_size += 0x800000;
+	}
+
+	if (ar)
+	{
+		// Order is important!
+		g_fxo->init<lv2_memory_container>(*ar);
+		g_fxo->init<id_manager::id_map<lv2_memory_container>>(*ar);
+		g_fxo->init<id_manager::id_map<named_thread<ppu_thread>>>(*ar);
+		g_fxo->init<id_manager::id_map<lv2_obj>>(*ar);
+	}
+	else
+	{
+		g_fxo->init<lv2_memory_container>(mem_size);
+		g_fxo->init<id_manager::id_map<lv2_memory_container>>();
+		g_fxo->init<id_manager::id_map<named_thread<ppu_thread>>>();
+		g_fxo->init<id_manager::id_map<lv2_obj>>();
+	}
+
 	// Initialize process
 	std::vector<std::shared_ptr<lv2_prx>> loaded_modules;
 
@@ -1589,7 +1677,10 @@ bool ppu_load_exec(const ppu_exec_object& elf)
 			{
 				ppu_loader.warning("Loading library: %s", name);
 
-				auto prx = ppu_load_prx(obj, lle_dir + name, 0);
+				auto prx = !ar ? ppu_load_prx(obj, lle_dir + name, 0, nullptr) : idm::select<lv2_obj, lv2_prx>([&](u32, lv2_prx& prx)
+				{
+					return Emu.GetCallbacks().resolve_path(prx.path) == Emu.GetCallbacks().resolve_path(lle_dir + name);
+				}).ptr;
 
 				if (prx->funcs.empty())
 				{
@@ -1634,7 +1725,13 @@ bool ppu_load_exec(const ppu_exec_object& elf)
 	// Set ppc fixed allocations segment permission
 	g_ps3_process_info.ppc_seg = ppc_seg;
 
-	if (ppc_seg != 0x0)
+	if (ar)
+	{
+		error_handler.errored = false;
+		return true;
+	}
+
+	if (ppc_seg != 0x0 && !ar)
 	{
 		if (ppc_seg != 0x1)
 		{
@@ -1707,49 +1804,9 @@ bool ppu_load_exec(const ppu_exec_object& elf)
 		ppu->gpr[1] -= Emu.data.size();
 	}
 
-	// Initialize memory stats (according to sdk version)
-	u32 mem_size;
-	if (sdk_version > 0x0021FFFF)
-	{
-		mem_size = 0xD500000;
-	}
-	else if (sdk_version > 0x00192FFF)
-	{
-		mem_size = 0xD300000;
-	}
-	else if (sdk_version > 0x0018FFFF)
-	{
-		mem_size = 0xD100000;
-	}
-	else if (sdk_version > 0x0017FFFF)
-	{
-		mem_size = 0xD000000;
-	}
-	else if (sdk_version > 0x00154FFF)
-	{
-		mem_size = 0xCC00000;
-	}
-	else
-	{
-		mem_size = 0xC800000;
-	}
+	g_fxo->get<lv2_memory_container>().used += primary_stacksize;
 
-	if (g_cfg.core.debug_console_mode)
-	{
-		// TODO: Check for all sdk versions
-		mem_size += 0xC000000;
-	}
-
-	if (g_ps3_process_info.get_cellos_appname() == "vsh.self"sv)
-	{
-		// Because vsh.self comes before any generic application, more memory is available to it
-		// This is an estimation though (TODO)
-		mem_size += 0x800000;
-	}
-
-	g_fxo->init<lv2_memory_container>(mem_size)->used += primary_stacksize;
-
-	ppu->cmd_push({ppu_cmd::initialize, 0});
+	ppu->cmd_push({ ppu_cmd::initialize, 0 });
 
 	if (!entry && g_ps3_process_info.get_cellos_appname() != "vsh.self"sv)
 	{
@@ -1808,7 +1865,7 @@ bool ppu_load_exec(const ppu_exec_object& elf)
 	return true;
 }
 
-std::pair<std::shared_ptr<lv2_overlay>, CellError> ppu_load_overlay(const ppu_exec_object& elf, const std::string& path, s64 file_offset)
+std::pair<std::shared_ptr<lv2_overlay>, CellError> ppu_load_overlay(const ppu_exec_object& elf, const std::string& path, s64 file_offset, cereal_load* ar)
 {
 	if (elf != elf_error::ok)
 	{
@@ -1885,7 +1942,7 @@ std::pair<std::shared_ptr<lv2_overlay>, CellError> ppu_load_overlay(const ppu_ex
 			}
 
 			// Copy segment data, hash it
-			std::memcpy(vm::base(addr), prog.bin.data(), prog.bin.size());
+			if (!ar) std::memcpy(vm::base(addr), prog.bin.data(), prog.bin.size());
 			sha1_update(&sha, reinterpret_cast<const uchar*>(&prog.p_vaddr), sizeof(prog.p_vaddr));
 			sha1_update(&sha, reinterpret_cast<const uchar*>(&prog.p_memsz), sizeof(prog.p_memsz));
 			sha1_update(&sha, prog.bin.data(), prog.bin.size());
@@ -2053,9 +2110,46 @@ std::pair<std::shared_ptr<lv2_overlay>, CellError> ppu_load_overlay(const ppu_ex
 	// Validate analyser results (not required)
 	ovlm->validate(0);
 
-	idm::import_existing<lv2_obj, lv2_overlay>(ovlm);
+	if (!ar) idm::import_existing<lv2_obj, lv2_overlay>(ovlm);
 
 	try_spawn_ppu_if_exclusive_program(*ovlm);
 
 	return {std::move(ovlm), {}};
+}
+
+std::shared_ptr<void> lv2_prx::load(cereal_load& ar)
+{
+	g_fxo->need<ppu_linkage_info>();
+
+	const std::string path = ar.operator std::string();
+
+	const u8 is_hle = ar;
+
+	std::shared_ptr<lv2_prx> prx;
+
+	if (is_hle)
+	{
+		prx = std::make_shared<lv2_prx>();
+		prx->path = path;
+		prx->name = path.substr(path.find_last_of(fs::delim) + 1);
+	}
+	else
+	{
+		prx = ppu_load_prx(ppu_prx_object{ decrypt_self(fs::file{path}) }, path, &ar);
+	}
+
+	return std::move(prx);
+}
+
+void lv2_prx::save(cereal_save& ar)
+{
+	ar(path);
+
+	// Save "is HLE?"
+	ar(u8{segs.empty()});
+
+	for (const ppu_segment& seg : segs)
+	{
+		if (seg.type == 0x1u && seg.size) ar(seg.addr);
+	}
 }

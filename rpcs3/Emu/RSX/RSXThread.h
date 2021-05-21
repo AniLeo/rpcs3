@@ -94,6 +94,13 @@ namespace rsx
 				}
 			}
 		}
+
+		template <typename Archive>
+		void serialize(Archive& ar)
+		{
+			// TODO: Mmeory inefficient
+			ar(ea, io);
+		}
 	};
 
 	enum framebuffer_creation_context : u8
@@ -345,6 +352,12 @@ namespace rsx
 		rsx::surface_raster_type raster_type;
 		u32 aa_factors[2];
 		bool ignore_change;
+
+		template <typename Archive>
+		void serialize(Archive& ar)
+		{
+			ar(reinterpret_cast<u8(&)[sizeof(*this)]>(*this));
+		}
 	};
 
 	namespace reports
@@ -696,6 +709,7 @@ namespace rsx
 
 		// I hate this flag, but until hle is closer to lle, its needed
 		bool isHLE{ false };
+		bool serialized = false;
 
 		u32 flip_status;
 		int debug_level;
@@ -803,7 +817,11 @@ namespace rsx
 		static constexpr auto thread_name = "rsx::thread"sv;
 
 	protected:
-		thread();
+		thread(cereal_load* ar);
+
+		thread() : thread(static_cast<cereal_load*>(nullptr)) {}
+		thread(cereal_load& ar) : thread(std::addressof(ar)) {}
+
 		virtual void on_task();
 		virtual void on_exit();
 
@@ -819,6 +837,7 @@ namespace rsx
 	public:
 		thread(const thread&) = delete;
 		thread& operator=(const thread&) = delete;
+		void save(cereal_save& ar);
 
 		virtual void clear_surface(u32 /*arg*/) {}
 		virtual void begin();
@@ -946,7 +965,7 @@ namespace rsx
 		void init(u32 ctrlAddress);
 
 		// Emu App/Game flip, only immediately flips when called from rsxthread
-		void request_emu_flip(u32 buffer);
+		bool request_emu_flip(u32 buffer);
 
 		void pause();
 		void unpause();

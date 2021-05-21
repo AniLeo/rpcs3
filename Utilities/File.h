@@ -815,4 +815,89 @@ namespace fs
 	}
 
 	file make_gather(std::vector<file>);
+
+	/*struct cereal_load
+	{
+		fs::file fd;
+		bool error = false;
+
+		template <typename T>
+		void read(T& obj) requires (std::is_constructible_v<T> && std::is_trivially_copyable_v<T>)
+		{
+			if (error || fd.read(std::addressof(obj), sizeof()) != size)
+			{
+				std::memset(ptr, 0, size);
+				error = true;
+			}
+		}
+
+		// STL containers with straight memory
+		template <template <class...> typename CT, typename T>
+		void read(CT<T>& obj) requires  (std::is_constructible_v<CT<T>> && !std::is_trivially_copyable_v<CT<T>>) && requires (CT<T>& obj) { obj.reserve(0); obj.insert(obj.end(), T()); }
+		{
+			usz size = 0;
+
+			if (error || fd.read(&size, sizeof(size)) != sizeof(size))
+			{
+				obj.clear();
+				error = true;
+				return;
+			}
+
+			obj.resize(size);
+
+			if (fd.read(obj.data(), sizeof(T) * size) != sizeof(T) * size)
+			{
+				obj.clear();
+				error = true;
+			}
+		}
+
+		template <template <class...> typename CT, typename T>
+		void read(CT<T>& obj) requires (std::is_constructible_v<CT<T>> && !std::is_trivially_copyable_v<CT<T>>) && (!requires (CT<T>& obj) { obj.reserve(0); }) && requires (CT<T>& obj) { obj.insert(obj.end(), T()); }
+		{
+			usz size = 0;
+
+			if (error || fd.read(&size, sizeof(size)) != sizeof(size))
+			{
+				obj.clear();
+				error = true;
+				return;
+			}
+
+			for (usz i = 0; i < size; i++)
+			{
+				T value{};
+
+				if (fd.read(std::addressof(value), sizeof(T)) != sizeof(T))
+				{
+					obj.clear();
+					error = true;
+					return;
+				}
+
+				obj.insert(obj.end(), std::move(value));
+			}
+		}
+
+		template <typename... T>
+		bool operator()(T&&... args) requires (((std::is_copy_constructible_v<T> && std::is_same_v<std::common_type_t<T>, T>) && ...))
+		{
+			(read(std::forward<T>(args)), ...);
+			return !error;
+		}
+
+		template <typename T> requires (std::is_copy_constructible_v<T> && std::is_same_v<std::common_type_t<T>, T>)
+		operator T()
+		{
+			T value{};
+			read(value);
+			return value;
+		}
+	};
+
+	struct cereal_save
+	{
+
+	};*/
 }

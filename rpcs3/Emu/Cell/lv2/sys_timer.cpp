@@ -6,6 +6,7 @@
 #include "Emu/Cell/ErrorCodes.h"
 #include "Emu/Cell/PPUThread.h"
 #include "Emu/Cell/timers.hpp"
+#include "Emu/System.h"
 #include "sys_event.h"
 #include "sys_process.h"
 
@@ -13,24 +14,53 @@
 
 LOG_CHANNEL(sys_timer);
 
+lv2_timer_context::lv2_timer_context(cereal_load& ar)
+	: state(ar)
+	, port(lv2_event_queue::load_ptr(ar, port))
+	, source(ar)
+	, data1(ar)
+	, data2(ar)
+	, expire(ar)
+	, period(ar)
+{
+}
+
+void lv2_timer_context::save(cereal_save& ar)
+{
+	ar(state), lv2_event_queue::save_ptr(ar, port.get()), ar(source, data1, data2, expire, period);
+}
+
 void lv2_timer_context::operator()()
 {
-	while (thread_ctrl::state() != thread_state::aborting)
+	while (Emu.IsPaused())
+	{
+		thread_ctrl::wait_for(10'000);
+	}
+
+	while (true)
 	{
 		const u32 _state = +state;
+		const bool aborting = thread_ctrl::state() == thread_state::aborting;
 
 		if (_state == SYS_TIMER_STATE_RUN)
 		{
 			const u64 _now = get_guest_system_time();
 			u64 next = expire;
 
-			if (_now >= next)
+			// If aborting, perform the last accurate check for event
+			if (_now >= next || aborting)
 			{
 				std::lock_guard lock(mutex);
 
 				if (next = expire; _now < next)
 				{
 					// expire was updated in the middle, don't send an event
+
+					if (aborting)
+					{
+						break;
+					}
+
 					continue;
 				}
 
@@ -56,6 +86,10 @@ void lv2_timer_context::operator()()
 			lv2_obj::wait_timeout(next - _now);
 			continue;
 		}
+		else if (aborting)
+		{
+			break;
+		}
 
 		thread_ctrl::wait_on(state, _state);
 	}
@@ -67,7 +101,7 @@ error_code sys_timer_create(ppu_thread& ppu, vm::ptr<u32> timer_id)
 
 	sys_timer.warning("sys_timer_create(timer_id=*0x%x)", timer_id);
 
-	if (const u32 id = idm::make<lv2_obj, lv2_timer>("Timer Thread"))
+	if (const u32 id = idm::make<lv2_obj, lv2_timer>())
 	{
 		*timer_id = id;
 		return CELL_OK;
@@ -308,7 +342,10 @@ error_code sys_timer_usleep(ppu_thread& ppu, u64 sleep_time)
 	{
 		lv2_obj::sleep(ppu, sleep_time);
 
-		lv2_obj::wait_timeout<true>(sleep_time);
+		if (!lv2_obj::wait_timeout<true>(sleep_time))
+		{
+			ppu.incomplete_syscall_flag = true;
+		}
 	}
 	else
 	{

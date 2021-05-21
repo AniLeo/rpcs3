@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "Emu/System.h"
 #include "Emu/VFS.h"
 #include "Emu/IdManager.h"
@@ -36,6 +36,38 @@ struct trophy_context_t
 	std::string trp_name;
 	fs::file trp_stream;
 	std::unique_ptr<TROPUSRLoader> tropusr;
+
+	trophy_context_t() = default;
+
+	trophy_context_t(cereal_load& ar)
+		: trp_name(ar.operator std::string())
+	{
+		std::string trophy_path = vfs::get(Emu.GetDir() + "TROPDIR/" + trp_name + "/TROPHY.TRP");
+		trp_stream.open(trophy_path);
+
+		if (!trp_stream && Emu.GetCat() == "GD")
+		{
+			sceNpTrophy.warning("sceNpTrophyCreateContext failed to open trophy file from boot path: '%s'", trophy_path);
+			trophy_path = vfs::get("/dev_bdvd/PS3_GAME/TROPDIR/" + trp_name + "/TROPHY.TRP");
+			trp_stream.open(trophy_path);
+		}
+
+		if (!ar.operator bool())
+		{
+			return;
+		}
+
+		const std::string trophyPath = "/dev_hdd0/home/" + Emu.GetUsr() + "/trophy/" + trp_name;
+		tropusr = std::make_unique<TROPUSRLoader>();
+		const std::string trophyUsrPath = trophyPath + "/TROPUSR.DAT";
+		const std::string trophyConfPath = trophyPath + "/TROPCONF.SFM";
+		ensure(tropusr->Load(trophyUsrPath, trophyConfPath).success);
+	}
+
+	void save(cereal_save& ar)
+	{
+		ar(trp_name, tropusr.operator bool());
+	}
 };
 
 struct trophy_handle_t
@@ -45,6 +77,18 @@ struct trophy_handle_t
 	static const u32 id_count = 4;
 
 	bool is_aborted = false;
+
+	trophy_handle_t() = default;
+
+	trophy_handle_t(cereal_load& ar)
+		: is_aborted(ar)
+	{
+	}
+
+	void save(cereal_save& ar)
+	{
+		ar(is_aborted);
+	}
 };
 
 struct sce_np_trophy_manager
@@ -95,6 +139,18 @@ struct sce_np_trophy_manager
 		}
 
 		return res;
+	}
+
+	sce_np_trophy_manager() = default;
+
+	sce_np_trophy_manager(cereal_load& ar)
+		: is_initialized(ar.operator bool())
+	{
+	}
+
+	void save(cereal_save& ar)
+	{
+		ar(is_initialized.operator bool());
 	}
 };
 
@@ -617,6 +673,11 @@ error_code sceNpTrophyRegisterContext(ppu_thread& ppu, u32 context, u32 handle, 
 					queued->notify_one();
 				}
 
+				if (status.first == SCE_NP_TROPHY_STATUS_PROCESSING_COMPLETE)
+				{
+					thread_ctrl::wait_for(10000);
+					Emu.Pause();
+				}
 				return 0;
 			});
 		}

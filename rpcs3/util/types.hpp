@@ -1010,3 +1010,27 @@ constexpr auto fill_array(const T&... args)
 {
 	return fill_array_t<T...>{{args...}};
 }
+
+namespace cereal
+{
+	class BinaryOutputArchive;
+	class BinaryInputArchive;
+}
+
+using cereal_load = cereal::BinaryInputArchive;
+using cereal_save = cereal::BinaryOutputArchive;
+
+namespace stx
+{
+	template <typename T>
+	struct exact_t
+	{
+		T obj;
+
+		exact_t(T&& _obj) : obj(std::forward<T>(_obj)) {}
+
+		template <typename U> requires (std::is_same_v<U&, T>)
+		operator U&() const { return obj; };
+		operator const exact_t& () const { return *this;  }
+	};
+}

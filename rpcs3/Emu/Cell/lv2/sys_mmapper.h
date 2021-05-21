@@ -30,6 +30,10 @@ struct lv2_memory : lv2_obj
 
 	lv2_memory(u32 size, u32 align, u64 flags, u64 key, bool pshared, lv2_memory_container* ct);
 
+	lv2_memory(cereal_load& ar);
+	static std::shared_ptr<void> load(cereal_load& ar);
+	void save(cereal_save& ar);
+
 	CellError on_id_create();
 };
 

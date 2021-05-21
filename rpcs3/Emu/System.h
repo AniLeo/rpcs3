@@ -58,7 +58,7 @@ struct EmuCallbacks
 	std::function<void()> init_mouse_handler;
 	std::function<void(std::string_view title_id)> init_pad_handler;
 	std::function<std::unique_ptr<class GSFrameBase>()> get_gs_frame;
-	std::function<void()> init_gs_render;
+	std::function<void(cereal_load*)> init_gs_render;
 	std::function<std::shared_ptr<class AudioBackend>()> get_audio;
 	std::function<std::shared_ptr<class MsgDialogBase>()> get_msg_dialog;
 	std::function<std::shared_ptr<class OskDialogBase>()> get_osk_dialog;
@@ -104,6 +104,16 @@ class Emulator final
 
 	bool m_has_gui = true;
 
+	std::vector<std::function<void()>> deferred_deserialization;
+
+	void ExecDeserializationRemnants()
+	{
+		for (auto&& func : ::as_rvalue(std::move(deferred_deserialization)))
+		{
+			func();
+		}
+	}
+
 public:
 	Emulator() = default;
 
@@ -134,6 +144,11 @@ public:
 		};
 
 		return m_cb.call_after(std::move(final_func));
+	}
+
+	void DeferDeserialization(std::function<void()>&& func)
+	{
+		deferred_deserialization.emplace_back(std::move(func));
 	}
 
 	/** Set emulator mode to running unconditionnaly.
@@ -214,17 +229,22 @@ public:
 		return m_pause_amend_time;
 	}
 
-	game_boot_result BootGame(const std::string& path, const std::string& title_id = "", bool direct = false, bool add_only = false, bool force_global_config = false);
+	game_boot_result BootGame(const std::string& path, const std::string& title_id = "", bool direct = false, bool add_only = false, bool force_global_config = false, const std::string& savestate = "");
 	bool BootRsxCapture(const std::string& path);
+
+	game_boot_result BootGameInState(const std::string& path, const std::string& savestate, const std::string& title_id = "", bool direct = false, bool force_global_config = false)
+	{
+		return BootGame(path, title_id, direct, false, force_global_config, savestate);
+	}
 
 	void SetForceBoot(bool force_boot);
 
-	game_boot_result Load(const std::string& title_id = "", bool add_only = false, bool force_global_config = false, bool is_disc_patch = false);
+	game_boot_result Load(const std::string& title_id = "", bool add_only = false, bool force_global_config = false, bool is_disc_patch = false, cereal_load* ar = nullptr);
 	void Run(bool start_playtime);
 	bool Pause();
 	void Resume();
-	void Stop(bool restart = false);
-	void Restart() { Stop(true); }
+	void Stop(bool savestate = false, bool restart = false);
+	void Restart(bool savestate = false) { Stop(savestate, true); }
 	bool Quit(bool force_quit);
 	static void CleanUp();
 

@@ -40,6 +40,10 @@ struct lv2_sema final : lv2_obj
 		, val(value)
 	{
 	}
+
+	lv2_sema(cereal_load& ar);
+	static std::shared_ptr<void> load(cereal_load& ar);
+	void save(cereal_save& ar);
 };
 
 // Aux

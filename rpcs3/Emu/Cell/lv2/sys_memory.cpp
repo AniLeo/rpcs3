@@ -12,18 +12,74 @@
 
 LOG_CHANNEL(sys_memory);
 
+//
+static shared_mutex s_memstats_mtx;
+
 lv2_memory_container::lv2_memory_container(u32 size, bool from_idm) noexcept
 	: size(size)
 	, id{from_idm ? idm::last_id() : SYS_MEMORY_CONTAINER_ID_INVALID}
 {
 }
 
-//
-static shared_mutex s_memstats_mtx;
+lv2_memory_container::lv2_memory_container(cereal_load& ar, u32 id) noexcept
+	: size(ar)
+	, id{id}
+	, used(ar)
+{
+}
+
+std::shared_ptr<void> lv2_memory_container::load(cereal_load& ar)
+{
+	// Use idm::last_id() only for the instances at IDM  
+	return std::make_shared<lv2_memory_container>(ar, idm::last_id());
+}
+
+void lv2_memory_container::save(cereal_save& ar)
+{
+	ar(size, used);
+}
+
+lv2_memory_container* lv2_memory_container::search(u32 id)
+{
+	if (id != SYS_MEMORY_CONTAINER_ID_INVALID)
+	{
+		return idm::check<lv2_memory_container>(id);
+	}
+
+	return &g_fxo->get<lv2_memory_container>();
+}
 
 struct sys_memory_address_table
 {
 	atomic_t<lv2_memory_container*> addrs[65536]{};
+
+	sys_memory_address_table() = default;
+
+	sys_memory_address_table(cereal_load& ar, stx::manual_typemap<void, 0x20'00000, 128>& fxo)
+	{
+		// First: address, second: conatiner ID (SYS_MEMORY_CONTAINER_ID_INVALID for global FXO memory container)
+		std::map<u16, u32> mm = ar;
+
+		for (const auto& [addr, id] : mm)
+		{
+			addrs[addr] = id != umax ? idm::check_unlocked<lv2_memory_container>(id) : &fxo.get<lv2_memory_container>();
+		}
+	}
+
+	void save(cereal_save& ar)
+	{
+		std::map<u16, u32> mm;
+
+		for (auto& ctr : addrs)
+		{
+			if (const auto ptr = +ctr)
+			{
+				mm[static_cast<u16>(&ctr - addrs)] = ptr->id; 
+			}
+		}
+
+		ar(mm);
+	}
 };
 
 // Todo: fix order of error checks

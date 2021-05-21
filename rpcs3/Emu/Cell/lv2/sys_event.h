@@ -93,6 +93,12 @@ struct lv2_event_queue final : public lv2_obj
 
 	lv2_event_queue(u32 protocol, s32 type, s32 size, u64 name, u64 ipc_key) noexcept;
 
+	lv2_event_queue(cereal_load& ar) noexcept;
+	static std::shared_ptr<void> load(cereal_load& ar);
+	void save(cereal_save& ar);
+	static void save_ptr(cereal_save&, lv2_event_queue*);
+	static std::shared_ptr<lv2_event_queue> load_ptr(cereal_load& ar, std::shared_ptr<lv2_event_queue>& queue);
+
 	CellError send(lv2_event);
 
 	CellError send(u64 source, u64 d1, u64 d2, u64 d3)
@@ -102,10 +108,6 @@ struct lv2_event_queue final : public lv2_obj
 
 	// Get event queue by its global key
 	static std::shared_ptr<lv2_event_queue> find(u64 ipc_key);
-
-	// Check queue ptr validity (use 'exists' member)
-	static bool check(const std::weak_ptr<lv2_event_queue>&);
-	static bool check(const std::shared_ptr<lv2_event_queue>&);
 };
 
 struct lv2_event_port final : lv2_obj
@@ -122,6 +124,9 @@ struct lv2_event_port final : lv2_obj
 		, name(name)
 	{
 	}
+
+	lv2_event_port(cereal_load& ar);
+	void save(cereal_save& ar);
 };
 
 class ppu_thread;

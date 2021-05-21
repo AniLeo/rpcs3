@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "VFS.h"
 #include "Utilities/bin_patch.h"
 #include "Emu/Memory/vm.h"
@@ -35,6 +35,7 @@
 #include <fstream>
 #include <memory>
 #include <regex>
+#include <optional>
 
 #include "Utilities/JIT.h"
 
@@ -57,19 +58,22 @@ std::string g_cfg_defaults;
 
 atomic_t<u64> g_watchdog_hold_ctr{0};
 
-extern bool ppu_load_exec(const ppu_exec_object&);
+extern bool ppu_load_exec(const ppu_exec_object&, cereal_load* = nullptr);
 extern void spu_load_exec(const spu_exec_object&);
 extern void ppu_precompile(std::vector<std::string>& dir_queue, std::vector<lv2_prx*>* loaded_prx);
 extern bool ppu_initialize(const ppu_module&, bool = false);
 extern void ppu_finalize(const ppu_module&);
 extern void ppu_unload_prx(const lv2_prx&);
-extern std::shared_ptr<lv2_prx> ppu_load_prx(const ppu_prx_object&, const std::string&, s64 = 0);
-extern std::pair<std::shared_ptr<lv2_overlay>, CellError> ppu_load_overlay(const ppu_exec_object&, const std::string& path, s64 = 0);
+extern std::shared_ptr<lv2_prx> ppu_load_prx(const ppu_prx_object&, const std::string&, s64 = 0, cereal_load* = nullptr);
+extern std::pair<std::shared_ptr<lv2_overlay>, CellError> ppu_load_overlay(const ppu_exec_object&, const std::string& path, s64 = 0, cereal_load* = nullptr);
 
 fs::file g_tty;
 atomic_t<s64> g_tty_size{0};
 std::array<std::deque<std::string>, 16> g_tty_input;
 std::mutex g_tty_mutex;
+
+u64 g_timebased_offs = 0;
+u64 g_systemtime_offs = 0;
 
 // Report error and call std::abort(), defined in main.cpp
 [[noreturn]] void report_fatal_error(std::string_view);
@@ -405,7 +409,7 @@ bool Emulator::BootRsxCapture(const std::string& path)
 	m_state = system_state::ready;
 	GetCallbacks().on_ready();
 
-	GetCallbacks().init_gs_render();
+	GetCallbacks().init_gs_render(nullptr);
 	GetCallbacks().init_pad_handler("");
 
 	GetCallbacks().on_run(false);
@@ -418,7 +422,7 @@ bool Emulator::BootRsxCapture(const std::string& path)
 	return true;
 }
 
-game_boot_result Emulator::BootGame(const std::string& path, const std::string& title_id, bool direct, bool add_only, bool force_global_config)
+game_boot_result Emulator::BootGame(const std::string& path, const std::string& title_id, bool direct, bool add_only, bool force_global_config, const std::string& savestate)
 {
 	if (!fs::exists(path))
 	{
@@ -427,10 +431,21 @@ game_boot_result Emulator::BootGame(const std::string& path, const std::string& 
 
 	m_path_old = m_path;
 
+	std::optional<std::istringstream> is;
+	std::optional<cereal_load> ari;
+
+	if (fs::file save{savestate})
+	{
+		is.emplace(save.to_string());
+		ari.emplace(*is);
+	}
+
+	cereal_load* ar = ari ? ari.operator->() : nullptr; 
+
 	if (direct || fs::is_file(path))
 	{
 		m_path = path;
-		return Load(title_id, add_only, force_global_config);
+		return Load(title_id, add_only, force_global_config, false, ar);
 	}
 
 	game_boot_result result = game_boot_result::nothing_to_boot;
@@ -450,7 +465,7 @@ game_boot_result Emulator::BootGame(const std::string& path, const std::string& 
 		if (fs::is_file(elf))
 		{
 			m_path = elf;
-			result = Load(title_id, add_only, force_global_config);
+			result = Load(title_id, add_only, force_global_config, false, ar);
 			break;
 		}
 	}
@@ -471,7 +486,7 @@ game_boot_result Emulator::BootGame(const std::string& path, const std::string& 
 				if (fs::is_file(elf))
 				{
 					m_path = elf;
-					if (const auto err = Load(title_id, add_only, force_global_config); err != game_boot_result::no_errors)
+					if (const auto err = Load(title_id, add_only, force_global_config, false, ar); err != game_boot_result::no_errors)
 					{
 						result = err;
 					}
@@ -487,7 +502,7 @@ void Emulator::SetForceBoot(bool force_boot)
 	m_force_boot = force_boot;
 }
 
-game_boot_result Emulator::Load(const std::string& title_id, bool add_only, bool force_global_config, bool is_disc_patch)
+game_boot_result Emulator::Load(const std::string& title_id, bool add_only, bool force_global_config, bool is_disc_patch, cereal_load* ar)
 {
 	m_force_global_config = force_global_config;
 	const std::string resolved_path = GetCallbacks().resolve_path(m_path);
@@ -673,12 +688,6 @@ game_boot_result Emulator::Load(const std::string& title_id, bool add_only, bool
 		vfs::mount("/dev_usb", g_cfg.vfs.get(g_cfg.vfs.dev_usb000, emu_dir));
 		vfs::mount("/dev_usb000", g_cfg.vfs.get(g_cfg.vfs.dev_usb000, emu_dir));
 		vfs::mount("/app_home", g_cfg.vfs.app_home.to_string().empty() ? elf_dir + '/' : g_cfg.vfs.get(g_cfg.vfs.app_home, emu_dir));
-
-		if (!hdd1.empty())
-		{
-			vfs::mount("/dev_hdd1", hdd1);
-			sys_log.notice("Hdd1: %s", vfs::get("/dev_hdd1"));
-		}
 
 		// Special boot mode (directory scan)
 		if (!add_only && fs::is_dir(m_path))
@@ -1157,6 +1166,22 @@ game_boot_result Emulator::Load(const std::string& title_id, bool add_only, bool
 		ppu_prx_object ppu_prx;
 		spu_exec_object spu_exec;
 
+		u64 systemtime_dst = 0, timebased_dst = 0;
+
+		if (ar)
+		{
+			systemtime_dst = ar->operator u64();
+			timebased_dst = ar->operator u64();
+			vm::load(*ar);
+			hdd1 = ar->operator std::string();
+		}
+
+		if (!hdd1.empty())
+		{
+			vfs::mount("/dev_hdd1", hdd1);
+			sys_log.notice("Hdd1: %s", vfs::get("/dev_hdd1"));
+		}
+
 		if (ppu_exec.open(elf_file) == elf_error::ok)
 		{
 			// PS3 executable
@@ -1229,18 +1254,22 @@ game_boot_result Emulator::Load(const std::string& title_id, bool add_only, bool
 			}
 
 			g_fxo->init<ppu_module>();
-			g_fxo->init<id_manager::id_map<lv2_obj>>();
-			g_fxo->init<id_manager::id_map<named_thread<ppu_thread>>>();
 
-			if (ppu_load_exec(ppu_exec))
+			if (ppu_load_exec(ppu_exec, ar))
 			{
 				ConfigurePPUCache();
 
-				g_fxo->init(false);
-				GetCallbacks().init_gs_render();
+				if (ar)
+				{
+					g_fxo->init<id_manager::id_map<named_thread<spu_thread>>>(*ar);
+				}
+
+				g_fxo->init(false, ar);
+				GetCallbacks().init_gs_render(ar);
 				GetCallbacks().init_pad_handler(m_title_id);
 				GetCallbacks().init_kb_handler();
 				GetCallbacks().init_mouse_handler();
+				if (ar) ExecDeserializationRemnants();
 			}
 			// Overlay (OVL) executable (only load it)
 			else if (vm::map(0x3000'0000, 0x1000'0000, 0x200); !ppu_load_overlay(ppu_exec, m_path).first)
@@ -1312,6 +1341,12 @@ game_boot_result Emulator::Load(const std::string& title_id, bool add_only, bool
 
 		const bool autostart = (std::exchange(m_force_boot, false) || g_cfg.misc.autostart);
 
+		if (ar)
+		{
+			g_systemtime_offs = systemtime_dst - get_guest_system_time();
+			g_timebased_offs = timebased_dst - get_timebased_time();
+		}
+
 		if (IsReady())
 		{
 			if (autostart)
@@ -1343,12 +1378,15 @@ void Emulator::Run(bool start_playtime)
 
 	rpcs3::utils::configure_logs();
 
-	// Run main thread
-	idm::check<named_thread<ppu_thread>>(ppu_thread::id_base, [](named_thread<ppu_thread>& cpu)
+	auto on_select = [] (u32, cpu_thread& cpu)
 	{
+		if (cpu.id_type() == 1 ? static_cast<ppu_thread&>(cpu).stop_flag_removal_protection : static_cast<spu_thread&>(cpu).stop_flag_removal_protection) return;
 		ensure(cpu.state.test_and_reset(cpu_flag::stop));
 		cpu.state.notify_one(cpu_flag::stop);
-	});
+	};
+
+	idm::select<named_thread<ppu_thread>>(on_select);
+	//idm::select<named_thread<spu_thread>>(on_select);
 
 	if (auto thr = g_fxo->try_get<named_thread<rsx::rsx_replay_thread>>())
 	{
@@ -1481,7 +1519,7 @@ void Emulator::Resume()
 	}
 }
 
-void Emulator::Stop(bool restart)
+void Emulator::Stop(bool savestate, bool restart)
 {
 	if (m_state.exchange(system_state::stopped) == system_state::stopped)
 	{
@@ -1496,6 +1534,9 @@ void Emulator::Stop(bool restart)
 		m_force_boot = false;
 		return;
 	}
+
+	std::ostringstream os;
+	cereal_save aro(os);
 
 	named_thread stop_watchdog("Stop Watchdog", [&]()
 	{
@@ -1525,16 +1566,29 @@ void Emulator::Stop(bool restart)
 
 	if (auto rsx = g_fxo->try_get<rsx::thread>())
 	{
-		// TODO: notify?
 		rsx->state += cpu_flag::exit;
 	}
 
 	cpu_thread::stop_all();
-	g_fxo->reset();
+	g_fxo->stop_all();
 
 	sys_log.notice("All threads have been stopped.");
 
+	if (savestate)
+	{
+		// Save them first for maxmimum timing accuracy
+		aro(get_guest_system_time(), get_timebased_time());
+		vm::save(aro);
+		aro(vfs::get("/dev_hdd1"));
+		g_fxo->save(aro);
+	}
+
+	g_timebased_offs = 0;
+	g_systemtime_offs = 0;
+
 	lv2_obj::cleanup();
+
+	g_fxo->reset();
 
 	sys_log.notice("Objects cleared...");
 
@@ -1574,9 +1628,30 @@ void Emulator::Stop(bool restart)
 
 	if (restart)
 	{
+		std::string save_data = os.str();
+
+		if (savestate)
+		{
+			const std::string path = fs::get_cache_dir() + "/RPCS3.SAVESTAT";
+			fs::pending_file file(path);
+
+			if (!file.file || (file.file.write(save_data), !file.commit()))
+			{
+				sys_log.error("Failed to write savestate to file! (path='%s', %s)", path, fs::g_tls_error);
+			}
+			else
+			{
+				sys_log.success("Saved savestate! path='%s'", path);
+			}
+		}
+
+		std::istringstream is(std::move(save_data));
+		cereal_load ari(is);
+
 		// Reload with prior configs.
-		if (const auto error = Load(m_title_id, false, m_force_global_config); error != game_boot_result::no_errors)
+		if (const auto error = Load(m_title_id, false, m_force_global_config, false, savestate ? &ari : nullptr); error != game_boot_result::no_errors)
 			sys_log.error("Restart failed: %s", error);
+
 		return;
 	}
 

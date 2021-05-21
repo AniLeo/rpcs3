@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 // Backported from auto_typemap.hpp as a more simple alternative
 
@@ -8,8 +8,25 @@
 #include <utility>
 #include <type_traits>
 
+#include <cereal/archives/binary.hpp>
+
+#include <cereal/types/vector.hpp>
+#include <cereal/types/array.hpp>
+#include <cereal/types/string.hpp>
+#include <cereal/types/utility.hpp>
+#include <cereal/types/deque.hpp>
+#include <cereal/types/tuple.hpp>
+#include <cereal/types/map.hpp>
+
+void print_debug(const char*);
 namespace stx
 {
+	template <typename T>
+	concept Stopable = requires (T& t)
+	{
+		static_cast<void(T::*)(void)>(&T::notify_and_join);
+	};
+
 	// Simplified typemap with exactly one object of each used type, non-moveable. Initialized on init(). Destroyed on clear().
 	template <typename Tag /*Tag should be unique*/, u32 Size = 0, u32 Align = (Size ? 64 : __STDCPP_DEFAULT_NEW_ALIGNMENT__)>
 	class alignas(Align) manual_typemap
@@ -56,13 +73,30 @@ namespace stx
 		// Save default constructor and destructor
 		struct typeinfo
 		{
-			bool(*create)(uchar* ptr, manual_typemap&) noexcept = nullptr;
+			bool(*create)(uchar* ptr, manual_typemap&, cereal_load*) noexcept = nullptr;
 			void(*destroy)(void* ptr) noexcept = nullptr;
-			std::string_view name{};
+			void(*stop)(void* ptr) noexcept = nullptr;
+			void(*save)(void* ptr, cereal_save&) noexcept = nullptr;
+			std::string_view name;
 
 			template <typename T>
-			static bool call_ctor(uchar* ptr, manual_typemap& _this) noexcept
+			static bool call_ctor(uchar* ptr, manual_typemap& _this, cereal_load* ar) noexcept
 			{
+				if (ar)
+				{
+					if constexpr (std::is_constructible_v<T, manual_typemap&, exact_t<cereal_load&>>)
+					{
+						new (ptr) T(_this, exact_t<cereal_load&>(*ar));
+						return true;
+					}
+
+					if constexpr (std::is_constructible_v<T, exact_t<cereal_load&>>)
+					{
+						new (ptr) T(exact_t<cereal_load&>(*ar));
+						return true;
+					}
+				}
+
 				// Allow passing reference to "this"
 				if constexpr (std::is_constructible_v<T, manual_typemap&>)
 				{
@@ -87,6 +121,23 @@ namespace stx
 			}
 
 			template <typename T>
+			static void call_stop(void* ptr) noexcept
+			{
+				print_debug((std::string(typeid(T).name()) + " Stopping").c_str());
+				std::launder(static_cast<T*>(ptr))->notify_and_join();
+			}
+
+			template <typename T>
+			static void call_save(void* ptr, cereal_save& ar) noexcept
+			{
+				if constexpr (std::is_constructible_v<T, exact_t<cereal_load&>> || std::is_constructible_v<T, manual_typemap&, exact_t<cereal_load&>>)
+				{
+					print_debug(typeid(T).name());
+					std::launder(static_cast<T*>(ptr))->save(ar);
+				}
+			}
+
+			template <typename T>
 			static typeinfo make_typeinfo()
 			{
 				static_assert(!std::is_copy_assignable_v<T> && !std::is_copy_constructible_v<T>, "Please make sure the object cannot be accidentally copied.");
@@ -99,6 +150,12 @@ namespace stx
 #else
 				constexpr std::string_view name = parse_type(__PRETTY_FUNCTION__);
 #endif
+				if constexpr (Stopable<T>)
+				{
+					r.stop = &call_stop<T>;
+				}
+
+				r.save = &call_save<T>;
 				r.name = name;
 				return r;
 			}
@@ -162,7 +219,7 @@ namespace stx
 			}
 		}
 
-		void init(bool reset = true)
+		void init(bool reset = true, cereal_load* ar = nullptr)
 		{
 			if (reset)
 			{
@@ -180,7 +237,7 @@ namespace stx
 					continue;
 				}
 
-				if (type.create(data, *this))
+				if (type.create(data, *this, ar))
 				{
 					*m_order++ = data;
 					*m_info++ = &type;
@@ -238,6 +295,58 @@ namespace stx
 			if constexpr (Size == 0)
 			{
 				m_list = nullptr;
+			}
+		}
+
+		void stop_all()
+		{
+			if (!m_init)
+			{
+				return;
+			}
+
+			// Get actual number of created objects
+			u32 _max = 0;
+
+			for (const auto& type : stx::typelist<typeinfo>())
+			{
+				if (m_init[type.index()])
+				{
+					// Skip object if not created
+					_max++;
+				}
+			}
+
+			// Stop threads in reverse order
+			for (u32 i = 1; i <= _max; i++)
+			{
+				if (auto stop = (*std::prev(m_info, i))->stop) stop(*std::prev(m_order, i));
+			}
+		}
+
+		void save(cereal_save& ar)
+		{
+			if (!m_init)
+			{
+				return;
+			}
+
+			// Get actual number of created objects
+			u32 _max = 0;
+
+			for (const auto& type : stx::typelist<typeinfo>())
+			{
+				if (m_init[type.index()])
+				{
+					// Skip object if not created
+					_max++;
+				}
+			}
+
+			// Save data in forward order
+			for (u32 i = _max; i; i--)
+			{
+				(*std::prev(m_info, i))->save(*std::prev(m_order, i), ar);
 			}
 		}
 

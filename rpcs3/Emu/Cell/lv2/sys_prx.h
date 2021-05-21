@@ -189,6 +189,11 @@ struct lv2_prx final : lv2_obj, ppu_module
 	char module_info_name[28];
 	u8 module_info_version[2];
 	be_t<u16> module_info_attributes;
+
+	lv2_prx() noexcept = default;
+	lv2_prx(cereal_load&) {}
+	static std::shared_ptr<void> load(cereal_load&);
+	void save(cereal_save& ar);
 };
 
 enum : u64

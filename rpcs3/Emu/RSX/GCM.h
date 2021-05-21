@@ -125,6 +125,12 @@ struct GcmZcullInfo
 
 		return ret;
 	}
+
+	template <typename Archive>
+	void serialize(Archive& ar)
+	{
+		ar(reinterpret_cast<u8(&)[sizeof(*this)]>(*this));
+	}
 };
 
 struct GcmTileInfo
@@ -148,6 +154,12 @@ struct GcmTileInfo
 		ret.format = base | ((base + ((size - 1) / 0x10000)) << 13) | (comp << 26) | (1 << 30);
 
 		return ret;
+	}
+
+	template <typename Archive>
+	void serialize(Archive& ar)
+	{
+		ar(reinterpret_cast<u8(&)[sizeof(*this)]>(*this));
 	}
 };
 

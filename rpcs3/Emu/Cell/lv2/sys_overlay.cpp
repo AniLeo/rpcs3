@@ -12,7 +12,18 @@
 #include "sys_overlay.h"
 #include "sys_fs.h"
 
-extern std::pair<std::shared_ptr<lv2_overlay>, CellError> ppu_load_overlay(const ppu_exec_object&, const std::string& path, s64 file_offset);
+extern std::pair<std::shared_ptr<lv2_overlay>, CellError> ppu_load_overlay(const ppu_exec_object&, const std::string& path, s64 file_offset, cereal_load* ar = nullptr);
+
+std::shared_ptr<void> lv2_overlay::load(cereal_load& ar)
+{
+	const std::string path = ar.operator std::string();
+	return ppu_load_overlay(decrypt_self(fs::file{path}), path, 0, &ar).first;
+}
+
+void lv2_overlay::save(cereal_save& ar)
+{
+	ar(path);
+}
 
 extern bool ppu_initialize(const ppu_module&, bool = false);
 extern void ppu_finalize(const ppu_module&);

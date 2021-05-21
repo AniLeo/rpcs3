@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "sys_event_flag.h"
 
 #include "Emu/IdManager.h"
@@ -10,6 +10,26 @@
 #include <algorithm>
 
 LOG_CHANNEL(sys_event_flag);
+
+lv2_event_flag::lv2_event_flag(cereal_load& ar)
+	: protocol(ar)
+	, key(ar)
+	, type(ar)
+	, name(ar)
+{
+	ar(pattern);
+}
+
+std::shared_ptr<void> lv2_event_flag::load(cereal_load& ar)
+{
+	auto eflag = std::make_shared<lv2_event_flag>(ar);
+	return lv2_obj::load(eflag->key, eflag);
+}
+
+void lv2_event_flag::save(cereal_save& ar)
+{
+	ar(protocol, key, type, name, pattern);
+}
 
 error_code sys_event_flag_create(ppu_thread& ppu, vm::ptr<u32> id, vm::ptr<sys_event_flag_attribute_t> attr, u64 init)
 {
@@ -162,14 +182,22 @@ error_code sys_event_flag_wait(ppu_thread& ppu, u32 id, u64 bitptn, u32 mode, vm
 
 	while (auto state = ppu.state.fetch_sub(cpu_flag::signal))
 	{
-		if (is_stopped(state))
-		{
-			return {};
-		}
-
 		if (state & cpu_flag::signal)
 		{
 			break;
+		}
+
+		if (is_stopped(state))
+		{
+			std::lock_guard lock(flag->mutex);
+
+			if (std::find(flag->sq.begin(), flag->sq.end(), &ppu) == flag->sq.end())
+			{
+				break;
+			}
+
+			ppu.incomplete_syscall_flag = true;
+			return {};
 		}
 
 		if (timeout)
@@ -179,7 +207,7 @@ error_code sys_event_flag_wait(ppu_thread& ppu, u32 id, u64 bitptn, u32 mode, vm
 				// Wait for rescheduling
 				if (ppu.check_state())
 				{
-					return {};
+					continue;
 				}
 
 				std::lock_guard lock(flag->mutex);
@@ -270,6 +298,16 @@ error_code sys_event_flag_set(cpu_thread& cpu, u32 id, u64 bitptn)
 	if (true)
 	{
 		std::lock_guard lock(flag->mutex);
+
+		for (auto ppu : flag->sq)
+		{
+			if (static_cast<ppu_thread*>(ppu)->incomplete_syscall_flag)
+			{
+				cpu.try_get<ppu_thread>()->incomplete_syscall_flag = true;
+				cpu.state += cpu_flag::exit;
+				return {};
+			}
+		}
 
 		// Sort sleep queue in required order
 		if (flag->protocol != SYS_SYNC_FIFO)

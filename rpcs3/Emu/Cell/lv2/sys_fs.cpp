@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "sys_sync.h"
 #include "sys_fs.h"
 
@@ -135,6 +135,12 @@ lv2_fs_mount_point* lv2_fs_object::get_mp(std::string_view filename)
 	return &g_mp_sys_dev_root;
 }
 
+lv2_fs_object::lv2_fs_object(cereal_load& ar)
+	: name(ar)
+	, mp(get_mp(name.data()))
+{
+}
+
 u64 lv2_file::op_read(const fs::file& file, vm::ptr<void> buf, u64 size)
 {
 	// Copy data from intermediate buffer (avoid passing vm pointer to a native API)
@@ -180,6 +186,51 @@ u64 lv2_file::op_write(const fs::file& file, vm::cptr<void> buf, u64 size)
 	}
 
 	return result;
+}
+
+lv2_file::lv2_file(cereal_load& ar)
+	: lv2_fs_object(ar)
+	, mode(ar)
+	, flags(ar)
+	, type(ar)
+{
+	ar(lock);
+
+	be_t<u64> arg = 0;
+	u64 size = 0;
+
+	switch (type)
+	{
+	case lv2_file_type::regular: break;
+	case lv2_file_type::sdata: arg = 0x18000000010; break; // TODO: Fix
+	case lv2_file_type::edata: arg = 0x2; break;
+	}
+
+	open_result_t res = lv2_file::open(name.data(), flags & CELL_FS_O_ACCMODE, mode, size ? &arg : nullptr, size);
+	file = std::move(res.file);
+	real_path = std::move(res.real_path);
+
+	usz seek_pos = 0;
+	ar(seek_pos);
+
+	file.seek(seek_pos);
+}
+
+void lv2_file::save(cereal_save& ar)
+{
+	ar(name, mode, flags, type, lock, file.pos());
+}
+
+lv2_dir::lv2_dir(cereal_load& ar)
+	: lv2_fs_object(ar)
+{
+	// TODO
+}
+
+void lv2_dir::save(cereal_save& ar)
+{
+	// TODO
+	ar(name);
 }
 
 struct lv2_file::file_view : fs::file_base
@@ -1870,11 +1921,6 @@ error_code sys_fs_fget_block_size(ppu_thread& ppu, u32 fd, vm::ptr<u64> sector_s
 		return CELL_EBADF;
 	}
 
-	if (ppu.is_stopped())
-	{
-		return {};
-	}
-
 	// TODO
 	*sector_size = file->mp->sector_size;
 	*block_size = file->mp->block_size;
@@ -1922,11 +1968,6 @@ error_code sys_fs_get_block_size(ppu_thread& ppu, vm::cptr<char> path, vm::ptr<u
 		}
 
 		return {CELL_EIO, path}; // ???
-	}
-
-	if (ppu.is_stopped())
-	{
-		return {};
 	}
 
 	// TODO

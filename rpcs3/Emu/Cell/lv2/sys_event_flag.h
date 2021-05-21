@@ -54,6 +54,10 @@ struct lv2_event_flag final : lv2_obj
 	{
 	}
 
+	lv2_event_flag(cereal_load& ar);
+	static std::shared_ptr<void> load(cereal_load& ar);
+	void save(cereal_save& ar);
+
 	// Check mode arg
 	static bool check_mode(u32 mode)
 	{

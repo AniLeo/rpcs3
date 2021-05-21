@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "sys_rsx.h"
 
 #include "Emu/Cell/PPUModule.h"
@@ -74,7 +74,7 @@ void rsx::thread::send_event(u64 data1, u64 event_flags, u64 data3) const
 		error = sys_event_port_send(rsx_event_port, data1, event_flags, data3);
 	}
 
-	if (error && error + 0u != CELL_ENOTCONN)
+	if (!Emu.IsPaused() && error && error + 0u != CELL_ENOTCONN)
 	{
 		fmt::throw_exception("rsx::thread::send_event() Failed to send event! (error=%x)", +error);
 	}
@@ -479,7 +479,16 @@ error_code sys_rsx_context_attribute(u32 context_id, u32 package_id, u64 a3, u64
 			}
 		}
 
-		render->request_emu_flip(flip_idx);
+		if (!render->request_emu_flip(flip_idx))
+		{
+			if (auto cpu = get_current_cpu_thread<ppu_thread>())
+			{
+				cpu->state += cpu_flag::exit;
+				cpu->incomplete_syscall_flag = true;
+			}
+
+			return {};
+		}
 	}
 	break;
 

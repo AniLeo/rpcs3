@@ -41,11 +41,30 @@ struct sysutil_cb_manager
 	{
 		vm::ptr<CellSysutilCallback> first;
 		vm::ptr<void> second;
+
+		template <typename Archive>
+		void serialize(Archive& ar)
+		{
+			ar(reinterpret_cast<u8(&)[8]>(*this));
+		}
 	};
 
 	atomic_t<registered_cb> callbacks[4]{};
 
 	lf_queue<std::function<s32(ppu_thread&)>> registered;
+
+	sysutil_cb_manager() = default;
+
+	sysutil_cb_manager(cereal_load& ar)
+	{
+		ar(callbacks);
+	}
+
+	void save(cereal_save& ar)
+	{
+		//ensure(!registered);
+		ar(callbacks);
+	}
 };
 
 extern void sysutil_register_cb(std::function<s32(ppu_thread&)>&& cb)

@@ -1,4 +1,4 @@
-// Qt5.10+ frontend implementation for rpcs3. Known to work on Windows, Linux, Mac
+﻿// Qt5.10+ frontend implementation for rpcs3. Known to work on Windows, Linux, Mac
 // by Sacha Refshauge, Megamouse and flash-fire
 
 #include <iostream>
@@ -180,6 +180,10 @@ LOG_CHANNEL(q_debug, "QDEBUG");
 	std::abort();
 }
 
+void print_debug(const char* fff)
+{
+ OutputDebugStringA(fff);
+}
 struct fatal_error_listener final : logs::listener
 {
 	~fatal_error_listener() override = default;

@@ -20,6 +20,7 @@ enum class ppu_cmd : u32
 	hle_call, // Execute function by index (arg)
 	ptr_call, // Execute function by pointer
 	opd_call, // Execute function by provided rtoc and address (unlike lle_call, does not read memory)
+	cia_call, // Execute from current CIA, mo GPR modification applied
 	initialize, // ppu_initialize()
 	sleep,
 	reset_stack, // resets stack address
@@ -140,9 +141,11 @@ public:
 	virtual ~ppu_thread() override;
 
 	ppu_thread(const ppu_thread_params&, std::string_view name, u32 prio, int detached = 0);
-
+	ppu_thread(cereal_load& ar);
 	ppu_thread(const ppu_thread&) = delete;
 	ppu_thread& operator=(const ppu_thread&) = delete;
+	bool savable() const { return joiner != ppu_join_status::exited; }
+	void save(cereal_save& ar);
 
 	u64 gpr[32] = {}; // General-Purpose Registers
 	f64 fpr[32] = {}; // Floating Point Registers
@@ -216,6 +219,12 @@ public:
 		bool ov{}; // Overflow
 		bool ca{}; // Carry
 		u8 cnt{};  // 0..6
+
+		template <class Archive>
+		void serialize(Archive& ar)
+		{
+			ar(so, ov, ca, cnt);
+		}
 	}
 	xer;
 
@@ -302,9 +311,15 @@ public:
 		operator std::string() const;
 	} thread_name{ this };
 
+	// For savestates
+	bool stop_flag_removal_protection = false; // If set, Emulator::Run won't remove stop flag 
+	bool incomplete_syscall_flag = false; // If set, CIA won't advance on syscall end
+	bool loaded_from_savestate = false; // Indicates the thread had just started straight from savestate load
+	u64 optional_syscall_state{};
+
 	be_t<u64>* get_stack_arg(s32 i, u64 align = alignof(u64));
 	void exec_task();
-	void fast_call(u32 addr, u32 rtoc);
+	void fast_call(u32 addr, u64 rtoc);
 
 	static u32 stack_push(u32 size, u32 align_v);
 	static void stack_pop_verbose(u32 addr, u32 size) noexcept;

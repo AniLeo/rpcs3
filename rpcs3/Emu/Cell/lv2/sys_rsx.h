@@ -124,6 +124,12 @@ struct RsxDisplayInfo
 	{
 		return height != 0u && width != 0u;
 	}
+
+	template <typename Archive>
+	void serialize(Archive& ar)
+	{
+		ar(reinterpret_cast<u8(&)[sizeof(*this)]>(*this));
+	}
 };
 
 // SysCalls

@@ -1,4 +1,4 @@
-#pragma once // No BOM and only basic ASCII in this header, or a neko will die
+﻿#pragma once // No BOM and only basic ASCII in this header, or a neko will die
 
 #include "util/types.hpp"
 #include <functional>
@@ -1614,6 +1614,12 @@ public:
 	{
 		const u128 mask = std::bit_cast<get_uint_t<sizeof(T)>>(mask_value);
 		atomic_wait_engine::notify_all(&m_data, sizeof(T), mask);
+	}
+
+	template <class Archive>
+	void serialize(Archive& ar)
+	{
+		ar(m_data);
 	}
 };
 

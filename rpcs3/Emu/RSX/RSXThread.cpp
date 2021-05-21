@@ -364,7 +364,7 @@ namespace rsx
 		g_access_violation_handler = nullptr;
 	}
 
-	thread::thread()
+	thread::thread(cereal_load* _ar)
 		: cpu_thread(0x5555'5555)
 	{
 		g_access_violation_handler = [this](u32 address, bool is_writing)
@@ -386,6 +386,51 @@ namespace rsx
 		}
 
 		state -= cpu_flag::stop + cpu_flag::wait; // TODO: Remove workaround
+
+		if (!_ar)
+		{
+			return;
+		}
+
+		serialized = true;
+		cereal_load& ar = *_ar;
+
+		ar(rsx::method_registers);
+	
+		for (auto& v : vertex_push_buffers)
+		{
+			ar(v.size, v.type, v.vertex_count, v.attribute_mask);
+			v.data.resize(ar.operator u32());
+			ar(cereal::binary_data(v.data.data(), v.data.size() * sizeof(u32)));
+		}
+
+		ar(element_push_buffer, fifo_ret_addr, saved_fifo_ret, zcull_surface_active, m_surface_info, m_depth_surface_info, m_framebuffer_layout);
+		ar(dma_address, iomap_table, restore_point, tiles, zculls, device_addr, label_addr, main_mem_size, local_mem_size, rsx_event_port, driver_info);
+		ar(in_begin_end, zcull_stats_enabled, zcull_rendering_enabled, zcull_pixel_cnt_enabled);
+		ar(display_buffers, display_buffers_count, current_display_buffer);
+
+		if (dma_address)
+		{
+			ctrl = vm::_ptr<RsxDmaControl>(dma_address);
+			m_rsx_thread_exiting = false;
+		}
+
+	}
+
+	void thread::save(cereal_save& ar)
+	{
+		ar(rsx::method_registers);
+
+		for (auto& v : vertex_push_buffers)
+		{
+			ar(v.size, v.type, v.vertex_count, v.attribute_mask, v.data.size());
+			ar(cereal::binary_data(v.data.data(), v.data.size() * sizeof(u32)));
+		}
+
+		ar(element_push_buffer, fifo_ret_addr, saved_fifo_ret, zcull_surface_active, m_surface_info, m_depth_surface_info, m_framebuffer_layout);
+		ar(dma_address, iomap_table, restore_point, tiles, zculls, device_addr, label_addr, main_mem_size, local_mem_size, rsx_event_port, driver_info);
+		ar(in_begin_end, zcull_stats_enabled, zcull_rendering_enabled, zcull_pixel_cnt_enabled);
+		ar(display_buffers, display_buffers_count, current_display_buffer);
 	}
 
 	void thread::capture_frame(const std::string &name)
@@ -536,7 +581,7 @@ namespace rsx
 			return fmt::format("RSX [0x%07x]", rsx->ctrl ? +rsx->ctrl->get : 0);
 		};
 
-		method_registers.init();
+		if (!serialized) method_registers.init();
 
 		rsx::overlays::reset_performance_overlay();
 
@@ -545,6 +590,11 @@ namespace rsx
 
 		is_inited = true;
 		is_inited.notify_all();
+
+		while (!lv2_obj::is_scheduler_ready())
+		{
+			thread_ctrl::wait_for(1000);
+		}
 
 		if (!zcull_ctrl)
 		{
@@ -688,6 +738,11 @@ namespace rsx
 
 	void thread::on_exit()
 	{
+		if (zcull_ctrl)
+		{
+			zcull_ctrl->sync(this);
+		}
+
 		// Deregister violation handler
 		g_access_violation_handler = nullptr;
 
@@ -695,7 +750,6 @@ namespace rsx
 		std::this_thread::sleep_for(10ms);
 		do_local_task(rsx::FIFO_state::lock_wait);
 
-		m_rsx_thread_exiting = true;
 		g_fxo->get<rsx::dma_manager>().join();
 		state += cpu_flag::exit;
 	}
@@ -2930,23 +2984,32 @@ namespace rsx
 		m_profiler.enabled = !!g_cfg.video.overlay;
 	}
 
-	void thread::request_emu_flip(u32 buffer)
+	bool thread::request_emu_flip(u32 buffer)
 	{
 		if (is_current_thread()) // requested through command buffer
 		{
 			// NOTE: The flip will clear any queued flip requests
 			handle_emu_flip(buffer);
+			return true;
 		}
 		else // requested 'manually' through ppu syscall
 		{
 			if (async_flip_requested & flip_request::emu_requested)
 			{
 				// ignore multiple requests until previous happens
-				return;
+				return true;
 			}
 
 			async_flip_buffer = buffer;
 			async_flip_requested |= flip_request::emu_requested;
+
+			if (state & cpu_flag::exit)
+			{
+				async_flip_requested.clear(flip_request::emu_requested);
+				return false;
+			}
+
+			return true;
 		}
 	}
 

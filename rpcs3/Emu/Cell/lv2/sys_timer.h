@@ -55,6 +55,12 @@ struct lv2_timer_context : lv2_obj
 			info.period      = 0;
 		}
 	}
+
+	static constexpr auto thread_name = "Timer Thread"sv;
+
+	lv2_timer_context() = default;
+	lv2_timer_context(cereal_load& ar);
+	void save(cereal_save& ar);
 };
 
 using lv2_timer = named_thread<lv2_timer_context>;

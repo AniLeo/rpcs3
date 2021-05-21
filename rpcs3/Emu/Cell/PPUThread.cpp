@@ -126,9 +126,9 @@ extern void ppu_initialize();
 extern void ppu_finalize(const ppu_module& info);
 extern bool ppu_initialize(const ppu_module& info, bool = false);
 static void ppu_initialize2(class jit_compiler& jit, const ppu_module& module_part, const std::string& cache_path, const std::string& obj_name);
-extern std::pair<std::shared_ptr<lv2_overlay>, CellError> ppu_load_overlay(const ppu_exec_object&, const std::string& path, s64 file_offset);
+extern std::pair<std::shared_ptr<lv2_overlay>, CellError> ppu_load_overlay(const ppu_exec_object&, const std::string& path, s64 file_offset, cereal_load* = nullptr);
 extern void ppu_unload_prx(const lv2_prx&);
-extern std::shared_ptr<lv2_prx> ppu_load_prx(const ppu_prx_object&, const std::string&, s64 file_offset);
+extern std::shared_ptr<lv2_prx> ppu_load_prx(const ppu_prx_object&, const std::string&, s64 file_offset, cereal_load* = nullptr);
 extern void ppu_execute_syscall(ppu_thread& ppu, u64 code);
 static bool ppu_break(ppu_thread& ppu, ppu_opcode_t op);
 
@@ -960,6 +960,11 @@ void ppu_thread::cpu_task()
 			cmd_pop(1), func(*this);
 			break;
 		}
+		case ppu_cmd::cia_call:
+		{
+			cmd_pop(), fast_call(std::exchange(cia, 0), gpr[2]);
+			break;
+		}
 		case ppu_cmd::initialize:
 		{
 			cmd_pop();
@@ -1154,6 +1159,139 @@ ppu_thread::ppu_thread(const ppu_thread_params& param, std::string_view name, u3
 	}
 }
 
+ppu_thread::ppu_thread(cereal_load& ar)
+	: cpu_thread(idm::last_id()) // last_id() is showed to constructor on serialization
+	, stack_size(ar)
+	, stack_addr(ar)
+	, joiner(ar.operator ppu_join_status())
+	, entry_func(std::bit_cast<ppu_func_opd_t>(ar.operator u64()))
+{
+	struct init_pushed
+	{
+		bool pushed = false;
+		atomic_t<bool> inited = false;
+	};
+
+	ar(gpr, fpr, cr.bits, fpscr.bits.bits, lr, ctr, vrsave, cia, xer, sat, nj, prio, optional_syscall_state);
+
+	for (v128& reg : vr)
+		ar(reg._bytes);
+
+	// Restore jm_mask
+	jm_mask = nj ? 0x7F800000 : 0x7fff'ffff;
+
+	switch (const u32 status = ar.operator u32())
+	{
+	case PPU_THREAD_STATUS_IDLE:
+	{
+		stop_flag_removal_protection = true;
+		break;
+	}
+	case PPU_THREAD_STATUS_RUNNABLE:
+	case PPU_THREAD_STATUS_ONPROC:
+	{
+		lv2_obj::awake(this);
+		[[fallthrough]];
+	}
+	case PPU_THREAD_STATUS_SLEEP:
+	{
+		if (std::exchange(g_fxo->get<init_pushed>().pushed, true))
+		{
+			cmd_list
+			({
+				{ppu_cmd::ptr_call, 0}, +[](ppu_thread& ppu) -> bool { thread_ctrl::wait_on(g_fxo->get<init_pushed>().inited, false); return false; }
+			});
+		}
+		else
+		{
+			cmd_push({ppu_cmd::initialize, 0});
+			cmd_list
+			({
+				{ppu_cmd::ptr_call, 0}, +[](ppu_thread&) -> bool
+				{
+					auto& inited = g_fxo->get<init_pushed>().inited;
+					inited = true;
+					inited.notify_all();
+
+					auto on_select = [] (u32, spu_thread& cpu)
+					{
+						if (static_cast<spu_thread&>(cpu).stop_flag_removal_protection) return;
+						ensure(cpu.state.test_and_reset(cpu_flag::stop));
+						cpu.state.notify_one(cpu_flag::stop);
+					};
+
+					idm::select<named_thread<spu_thread>>(on_select);
+					return true;
+				}
+			});
+		}
+
+		if (status == PPU_THREAD_STATUS_SLEEP)
+		{
+			cmd_list
+			({
+				{ppu_cmd::ptr_call, 0},
+
+				+[](ppu_thread& ppu) -> bool
+				{
+					ppu.loaded_from_savestate = true;
+					ppu_execute_syscall(ppu, ppu.gpr[11]);
+					ppu.loaded_from_savestate = false;
+					return true;
+				}
+			});
+
+			lv2_obj::set_future_sleep(this);
+		}
+
+		cmd_push({ppu_cmd::cia_call, 0});
+		break;
+	}
+	case PPU_THREAD_STATUS_ZOMBIE:
+	{
+		state += cpu_flag::exit;
+		break;
+	}
+	}
+
+	// Trigger the scheduler
+	state += cpu_flag::suspend;
+
+	if (!g_use_rtm)
+	{
+		state += cpu_flag::memory;
+	}
+
+	ppu_tname = make_single<std::string>(ar.operator std::string());
+}
+
+void ppu_thread::save(cereal_save& ar)
+{
+	const u64 entry = std::bit_cast<u64>(entry_func);
+
+	ppu_join_status _joiner = joiner;
+	if (_joiner >= ppu_join_status::max)
+	{
+		// Joining thread should recover this member properly
+		_joiner = ppu_join_status::joinable; 
+	}
+
+	if (incomplete_syscall_flag)
+	{
+		std::memcpy(&gpr[3], syscall_args, sizeof(syscall_args));
+		cia -= 4;
+	}
+
+	ar(stack_size, stack_addr, _joiner, entry, gpr, fpr, cr.bits, fpscr.bits.bits, lr, ctr, vrsave, cia, xer, sat, nj, prio, optional_syscall_state);
+
+	for (const v128& reg : vr)
+		ar(reg._bytes);
+
+	ar(lv2_obj::ppu_state(this, false));
+
+	ar(*ppu_tname.load());
+}
+
 ppu_thread::thread_name_t::operator std::string() const
 {
 	std::string thread_name = fmt::format("PPU[0x%x]", _this->id);
@@ -1230,7 +1368,7 @@ be_t<u64>* ppu_thread::get_stack_arg(s32 i, u64 align)
 	return vm::_ptr<u64>(vm::cast((gpr[1] + 0x30 + 0x8 * (i - 1)) & (0 - align)));
 }
 
-void ppu_thread::fast_call(u32 addr, u32 rtoc)
+void ppu_thread::fast_call(u32 addr, u64 rtoc)
 {
 	const auto old_cia = cia;
 	const auto old_rtoc = gpr[2];
@@ -1277,15 +1415,21 @@ void ppu_thread::fast_call(u32 addr, u32 rtoc)
 			cpu_on_stop();
 			current_function = old_func;
 		}
-		else
+		else if (old_cia)
 		{
-			state -= cpu_flag::ret;
+			if (state & cpu_flag::exit)
+			{
+				ppu_log.error("HLE callstack savestate is not implemented!");
+			}
+
 			cia = old_cia;
 			gpr[2] = old_rtoc;
 			lr = old_lr;
-			current_function = old_func;
-			g_tls_log_prefix = old_fmt;
 		}
+
+		current_function = old_func;
+		g_tls_log_prefix = old_fmt;
+		state -= cpu_flag::ret;
 	};
 
 	exec_task();
@@ -1982,7 +2126,7 @@ static bool ppu_store_reservation(ppu_thread& ppu, u32 addr, u64 reg_value)
 				{
 					if (count > 20000 && g_cfg.core.perf_report) [[unlikely]]
 					{
-						perf_log.warning(u8"STCX: took too long: %.3fµs (%u c)", count / (utils::get_tsc_freq() / 1000'000.), count);
+						perf_log.warning(u8"STCX: took too long: %.3fÂµs (%u c)", count / (utils::get_tsc_freq() / 1000'000.), count);
 					}
 
 					break;
@@ -2636,6 +2780,23 @@ extern void ppu_initialize()
 
 	// Initialize preloaded libraries
 	for (auto ptr : prx_list)
+	{
+		if (Emu.IsStopped())
+		{
+			return;
+		}
+
+		ppu_initialize(*ptr);
+	}
+
+	std::vector<lv2_overlay*> ovl_list;
+
+	idm::select<lv2_obj, lv2_overlay>([&](u32, lv2_overlay& ovl)
+	{
+		ovl_list.emplace_back(&ovl);
+	});
+
+	for (auto ptr : ovl_list)
 	{
 		if (Emu.IsStopped())
 		{

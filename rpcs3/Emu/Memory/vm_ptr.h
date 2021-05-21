@@ -217,6 +217,12 @@ namespace vm
 		{
 			return m_addr;
 		}
+
+		template <class Archive>
+		void serialize(Archive& ar)
+		{
+			ar(m_addr);
+		}
 	};
 
 	template<typename AT, typename RT, typename... T>

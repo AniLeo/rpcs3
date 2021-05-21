@@ -38,6 +38,10 @@ struct lv2_rwlock final : lv2_obj
 		, name(name)
 	{
 	}
+
+	lv2_rwlock(cereal_load& ar);
+	static std::shared_ptr<void> load(cereal_load& ar);
+	void save(cereal_save& ar);
 };
 
 // Aux

@@ -147,6 +147,12 @@ namespace rsx
 			ensure(range.start == address);
 			return range;
 		}
+
+		template <typename Archive>
+		void serialize(Archive& ar)
+		{
+			ar(reinterpret_cast<u8(&)[sizeof(*this)]>(*this));
+		}
 	};
 
 	struct avconf

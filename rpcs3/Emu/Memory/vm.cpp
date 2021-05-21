@@ -912,7 +912,7 @@ namespace vm
 		// Notify rsx to invalidate range
 		// Note: This must be done *before* memory gets unmapped while holding the vm lock, otherwise
 		//       the RSX might try to call VirtualProtect on memory that is already unmapped
-		if (auto& rsxthr = g_fxo->get<rsx::thread>(); g_fxo->is_init<rsx::thread>())
+		if (auto& rsxthr = g_fxo->get<rsx::thread>(); !Emu.IsPaused() && g_fxo->is_init<rsx::thread>())
 		{
 			rsxthr.on_notify_memory_unmapped(addr, size);
 		}
@@ -1393,6 +1393,118 @@ namespace vm
 		return imp_used(lock);
 	}
 
+	void block_t::get_shared_memory(std::vector<std::pair<utils::shm*, u32>>& shared)
+	{
+		auto& m_map = (m.*block_map)();
+
+		if (!(flags & preallocated))
+		{
+			shared.reserve(shared.size() + m_map.size());
+
+			for (const auto& [addr, shm] : m_map)
+			{
+				shared.emplace_back(shm.second.get(), addr);
+			}
+		}
+	}
+
+	u32 block_t::get_shm_addr(const std::shared_ptr<utils::shm>& shared)
+	{
+		auto& m_map = (m.*block_map)();
+
+		if (!(flags & preallocated))
+		{
+			for (auto& [addr, pair] : m_map)
+			{
+				if (pair.second == shared)
+				{
+					return addr;
+				}
+			}
+		}
+
+		return 0;
+	}
+
+	void block_t::save(cereal_save& ar, std::map<utils::shm*, usz>& shared)
+	{
+		auto& m_map = (m.*block_map)();
+
+		ar(addr, size, flags);
+
+		ar(m_map.size());
+
+		for (const auto& [addr, shm] : m_map)
+		{
+			ar(addr);
+			ar(shm.first);
+
+			// Assume first page flags represent all the map
+			ar(g_pages[addr / 4096 + !!(flags & stack_guarded)]);
+
+			if (flags & preallocated)
+			{
+				// Save raw binary image
+				const u32 guard_size = flags & stack_guarded ? 0x1000 : 0;
+				ar(cereal::binary_data(vm::get_super_ptr<const u8>(addr + guard_size), shm.first - guard_size * 2));
+			}
+			else
+			{
+				// Save index of shm
+				ar(shared[shm.second.get()]);
+			}
+		}
+	}
+
+	block_t::block_t(cereal_load& ar, std::vector<std::shared_ptr<utils::shm>>& shared)
+		: addr(ar)
+		, size(ar)
+		, flags(ar)
+	{
+		if (flags & preallocated)
+		{
+			m_common = std::make_shared<utils::shm>(size);
+			m_common->map_critical(vm::base(addr), utils::protection::no);
+			m_common->map_critical(vm::get_super_ptr(addr));
+			lock_sudo(addr, size);
+		}
+
+		auto& m_map = (m.*block_map)();
+
+		const usz max = ar;
+
+		std::shared_ptr<utils::shm> null_shm;
+
+		for (usz i = 0; i < max; i++)
+		{
+			const u32 addr0 = ar;
+			const u32 size0 = ar;
+			const u8 flags0 = ar;
+
+			u8 pflags = flags0 & (page_readable | page_writable | page_executable);
+
+			if ((flags & page_size_64k) == page_size_64k)
+			{
+				pflags |= page_64k_size;
+			}
+			else if (!(flags & (page_size_mask & ~page_size_1m)))
+			{
+				pflags |= page_1m_size;
+			}
+
+			// Map the memory through the same method as alloc() and falloc() 
+			// Copy the shared handle unconditionally
+			ensure(try_alloc(addr0, pflags, size0, ::as_rvalue(flags & preallocated ? null_shm : shared[ar.operator usz()])));
+
+			if (flags & preallocated)
+			{
+				// Load binary image
+				const u32 guard_size = flags & stack_guarded ? 0x1000 : 0;
+				ar(cereal::binary_data(vm::get_super_ptr<u8>(addr0 + guard_size), size0 - guard_size * 2));
+			}
+		}
+	}
+
 	static bool _test_map(u32 addr, u32 size)
 	{
 		const auto range = utils::address_range::start_length(addr, size);
@@ -1692,6 +1804,99 @@ namespace vm
 
 		std::memset(g_range_lock_set, 0, sizeof(g_range_lock_set));
 		g_range_lock_bits = 0;
+	}
+
+	void save(cereal_save& ar)
+	{
+		// Shared memory lookup, sample address is saved for easy memory copy
+		// Just need one address for this optimization 
+		std::vector<std::pair<utils::shm*, u32>> shared;
+
+		for (auto& loc : g_locations)
+		{
+			if (loc) loc->get_shared_memory(shared);
+		}
+
+		shared.erase(std::unique(shared.begin(), shared.end(), [](auto& a, auto& b) { return a.first == b.first; }), shared.end());
+
+		std::map<utils::shm*, usz> shared_map;
+
+		for (auto& p : shared)
+		{
+			shared_map.emplace(p.first, &p - shared.data());
+		}
+
+		// TODO: proper serialization of std::map
+		ar(static_cast<usz>(shared_map.size()));
+
+		for (const auto& [shm, addr] : shared)
+		{
+			//  Save shared memory
+			ar(shm->flags());
+
+			// TODO: string_view serialization (even with load function, so the loaded address points to a position of the stream's buffer)
+			ar(shm->size());
+			ar(cereal::binary_data(vm::get_super_ptr<u8>(addr), shm->size()));
+		}
+
+		// TODO: Serialize std::vector direcly
+		ar(g_locations.size());
+
+		for (auto& loc : g_locations)
+		{
+			const u8 has = loc.operator bool();
+			ar(has);
+
+			if (loc)
+			{
+				loc->save(ar, shared_map);
+			}
+		}
+	}
+
+	void load(cereal_load& ar)
+	{
+		std::vector<std::shared_ptr<utils::shm>> shared;
+		shared.resize(ar.operator usz());
+
+		for (auto& shm : shared)
+		{
+			// Load shared memory
+
+			const u32 flags = ar;
+			const u64 size = ar;
+			shm = std::make_shared<utils::shm>(size, flags);
+
+			// Load binary image
+			// elad335: I'm not proud about it as well.. (ideal situation is to not call map_self())
+			ar(cereal::binary_data(shm->map_self(), shm->size()));
+		}
+
+		g_locations.clear();
+		g_locations.resize(ar.operator usz());
+
+		for (auto& loc : g_locations)
+		{
+			const u8 has = ar;
+
+			if (has)
+			{
+				loc = std::make_shared<block_t>(ar, shared);
+			}
+		}
+	}
+
+	u32 get_shm_addr(const std::shared_ptr<utils::shm>& shared)
+	{
+		for (auto& loc : g_locations)
+		{
+			if (u32 addr = loc ? loc->get_shm_addr(shared) : 0)
+			{
+				return addr;
+			}
+		}
+
+		return 0;
 	}
 }
 

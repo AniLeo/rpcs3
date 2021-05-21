@@ -327,7 +327,7 @@ u64 VKGSRender::get_cycles()
 	return thread_ctrl::get_cycles(static_cast<named_thread<VKGSRender>&>(*this));
 }
 
-VKGSRender::VKGSRender() : GSRender()
+VKGSRender::VKGSRender(cereal_load* ar) noexcept : GSRender(ar)
 {
 	if (m_instance.create("RPCS3"))
 	{
