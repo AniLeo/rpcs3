@@ -673,11 +673,6 @@ error_code sceNpTrophyRegisterContext(ppu_thread& ppu, u32 context, u32 handle, 
 					queued->notify_one();
 				}
 
-				if (status.first == SCE_NP_TROPHY_STATUS_PROCESSING_COMPLETE)
-				{
-					thread_ctrl::wait_for(10000);
-					Emu.Pause();
-				}
 				return 0;
 			});
 		}

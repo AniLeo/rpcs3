@@ -179,12 +179,25 @@ struct audio_port
 		return vm::_ptr<f32>(buf_addr(offset));
 	}
 
-
 	// Tags
 	u32 prev_touched_tag_nr;
 	f32 last_tag_value[PORT_BUFFER_TAG_COUNT] = { 0 };
 
 	void tag(s32 offset = 0);
+
+	template <typename Archive>
+	void serialize(Archive& ar)
+	{
+		ar(reinterpret_cast<u8(&)[sizeof(*this)]>(*this));
+	}
+
+	audio_port() = default;
+
+	// Handle copy ctor of atomic var
+	audio_port(const audio_port& r)
+	{
+		std::memcpy(this, &r, sizeof(r));
+	}
 };
 
 struct cell_audio_config
@@ -397,9 +410,9 @@ public:
 
 	void operator()();
 
-	cell_audio_thread()
-	{
-	}
+	cell_audio_thread() = default;
+	cell_audio_thread(cereal_load& ar);
+	void save(cereal_save& ar);
 
 	audio_port* open_port()
 	{

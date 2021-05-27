@@ -364,6 +364,43 @@ void audio_port::tag(s32 offset)
 	prev_touched_tag_nr = -1;
 }
 
+cell_audio_thread::cell_audio_thread(cereal_load& ar)
+	: init(ar)
+	, key_count(ar)
+	, event_period(ar)
+	, keys([&]()
+	{
+		keys.resize(ar);
+
+		for (key_info& k : keys)
+		{
+			ar(k.start_period, k.flags, k.source);
+			k.port = lv2_event_queue::load_ptr(ar, k.port);
+		}
+
+		// If only a lambda which returns void was allowed here..
+		// But you get what it does
+		return std::move(keys);
+	}())
+	, ports(ar)
+{
+
+}
+
+void cell_audio_thread::save(cereal_save& ar)
+{
+	ar(init, key_count, event_period);
+	ar(keys.size());
+
+	for (const key_info& k : keys)
+	{
+		ar(k.start_period, k.flags, k.source);
+		lv2_event_queue::save_ptr(ar, k.port.get());
+	}
+
+	ar(ports);
+}
+
 std::tuple<u32, u32, u32, u32> cell_audio_thread::count_port_buffer_tags()
 {
 	AUDIT(cfg.buffering_enabled);
@@ -599,6 +636,11 @@ void cell_audio_thread::update_config()
 
 void cell_audio_thread::operator()()
 {
+	while (!lv2_obj::is_scheduler_ready())
+	{
+		thread_ctrl::wait_for(5000);
+	}
+
 	thread_ctrl::scoped_priority high_prio(+1);
 
 	// Allocate ringbuffer

@@ -131,7 +131,7 @@ struct ppu_linkage_info
 };
 
 // Initialize static modules.
-static void ppu_initialize_modules(ppu_linkage_info* link)
+static void ppu_initialize_modules(ppu_linkage_info* link, cereal_load* ar = nullptr)
 {
 	if (!link->modules.empty())
 	{
@@ -298,6 +298,69 @@ static void ppu_initialize_modules(ppu_linkage_info* link)
 		ppu_loader.trace("Registered static module: %s", _module->name);
 	}
 
+	struct hle_vars_save
+	{
+		hle_vars_save() = default;
+
+		hle_vars_save(const hle_vars_save&) = delete;
+
+		hle_vars_save& operator =(const hle_vars_save&) = delete;
+
+		hle_vars_save(cereal_load& ar)
+		{
+			auto& manager = ppu_module_manager::get();
+
+			while (true)
+			{
+				const std::string name = ar.operator std::string();
+	
+				if (name.empty())
+				{
+					// Null termination
+					break;
+				}
+
+				const auto _module = manager.at(name);
+
+				auto& variable = _module->variables;
+	
+				for (u32 i = 0, end = ar.operator usz(); i < end; i++)
+				{
+					variable[ar.operator u32()].addr = ar.operator u32();
+				}
+			}
+		}
+
+		void save(cereal_save& ar)
+		{
+			for (auto& pair : ppu_module_manager::get())
+			{
+				const auto _module = pair.second;
+
+				ar(_module->name);
+
+				ar(_module->variables.size());
+
+				for (auto& variable : _module->variables)
+				{
+					ar(variable.first, variable.second.addr);
+				}
+			}
+
+			// Null terminator
+			ar(std::string{});
+		}
+	};
+
+	if (ar)
+	{
+		g_fxo->init<hle_vars_save>(*ar);
+	}
+	else
+	{
+		g_fxo->init<hle_vars_save>();
+	}
+
 	for (auto& pair : ppu_module_manager::get())
 	{
 		const auto _module = pair.second;
@@ -327,7 +390,7 @@ static void ppu_initialize_modules(ppu_linkage_info* link)
 			ppu_loader.trace("** &0x%08X: %s (size=0x%x, align=0x%x)", variable.first, variable.second.name, variable.second.size, variable.second.align);
 
 			// Allocate HLE variable
-			if (variable.second.size >= 0x10000 || variable.second.align >= 0x10000)
+			if (!ar) if (variable.second.size >= 0x10000 || variable.second.align >= 0x10000)
 			{
 				variable.second.addr = vm::alloc(variable.second.size, vm::main, std::max<u32>(variable.second.align, 0x10000));
 			}
@@ -1414,7 +1477,7 @@ bool ppu_load_exec(const ppu_exec_object& elf, cereal_load* ar)
 	}
 
 	// Initialize HLE modules
-	ppu_initialize_modules(&link);
+	ppu_initialize_modules(&link, ar);
 
 	// Embedded SPU elf patching
 	for (const auto& seg : _main.segs)
@@ -2135,7 +2198,7 @@ std::shared_ptr<void> lv2_prx::load(cereal_load& ar)
 	}
 	else
 	{
-		prx = ppu_load_prx(ppu_prx_object{ decrypt_self(fs::file{path}) }, path, &ar);
+		prx = ppu_load_prx(ppu_prx_object{ decrypt_self(fs::file{path}) }, path, 0, &ar);
 	}
 
 	return std::move(prx);
