@@ -326,7 +326,9 @@ static void ppu_initialize_modules(ppu_linkage_info* link, cereal_load* ar = nul
 	
 				for (u32 i = 0, end = ar.operator usz(); i < end; i++)
 				{
-					variable[ar.operator u32()].addr = ar.operator u32();
+					auto* ptr = &variable.at(ar.operator u32());
+					ptr->addr = ar.operator u32();
+					ensure(!!ptr->var);
 				}
 			}
 		}
