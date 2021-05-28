@@ -13,7 +13,7 @@ namespace vk
 		info.addressModeU = clamp_u;
 		info.addressModeV = clamp_v;
 		info.addressModeW = clamp_w;
-		info.anisotropyEnable = VK_TRUE;
+		info.anisotropyEnable = VK_FALSE;
 		info.compareEnable = depth_compare;
 		info.unnormalizedCoordinates = unnormalized_coordinates;
 		info.mipLodBias = mipLodBias;
