@@ -1413,7 +1413,7 @@ ppu_thread_status lv2_obj::ppu_state(ppu_thread* ppu, bool lock_idm)
 		opt_lock.emplace(id_manager::g_mutex);
 	}
 
-	if (!Emu.IsReady() ? ppu->state.all_of(cpu_flag::stop) : !ppu->stop_flag_removal_protection)
+	if ((!Emu.IsReady()) ? ppu->state.all_of(cpu_flag::stop) : ppu->stop_flag_removal_protection)
 	{
 		return PPU_THREAD_STATUS_IDLE;
 	}
