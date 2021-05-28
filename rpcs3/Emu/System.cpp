@@ -1582,8 +1582,8 @@ void Emulator::Stop(bool savestate, bool restart)
 	if (savestate)
 	{
 		// Save them first for maxmimum timing accuracy
-		const u64 times[2]{get_guest_system_time(), get_timebased_time())};
-		ar(m_path);
+		const u64 times[2]{get_guest_system_time(), get_timebased_time()};
+		aro(m_path);
 		vm::save(aro);
 		aro(vfs::get("/dev_hdd1"));
 		g_fxo->save(aro);
