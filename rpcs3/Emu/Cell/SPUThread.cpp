@@ -1919,6 +1919,14 @@ spu_thread::spu_thread(cereal_load& ar, lv2_spu_group* group)
 			q = idm::get_unlocked<lv2_obj, lv2_event_queue>(ar.operator u32());
 		}
 	}
+	else
+	{
+		for (spu_int_ctrl_t& ctrl : int_ctrl)
+		{
+			ar(ctrl.mask, ctrl.stat);
+			ctrl.tag = idm::get_unlocked<lv2_obj, lv2_int_tag>(ar.operator u32());
+		}
+	}
 
 	std::for_each_n(mfc_queue, mfc_size, [&](spu_mfc_cmd& cmd) { ar(cmd); });
 
@@ -1978,6 +1986,13 @@ void spu_thread::save(cereal_save& ar)
 		for (auto& p : spup)
 		{
 			ar(lv2_obj::check(p) ? p->id : 0);
+		}
+	}
+	else
+	{
+		for (const spu_int_ctrl_t& ctrl : int_ctrl)
+		{
+			ar(ctrl.mask, ctrl.stat, ctrl.tag->id);
 		}
 	}
 
