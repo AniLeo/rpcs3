@@ -82,7 +82,10 @@ CellError lv2_memory::on_id_create()
 std::shared_ptr<void> lv2_memory::load(cereal_load& ar)
 {
 	auto mem = std::make_shared<lv2_memory>(ar);
-	return lv2_obj::load(mem->key, mem, +mem->pshared);
+	mem->exists++; // Disable on_id_create() 
+	std::shared_ptr<void> ptr = lv2_obj::load(mem->key, mem, +mem->pshared);
+	mem->exists--;
+	return ptr;
 }
 
 void lv2_memory::save(cereal_save& ar)
