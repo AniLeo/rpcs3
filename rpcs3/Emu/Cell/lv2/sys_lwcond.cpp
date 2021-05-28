@@ -414,7 +414,7 @@ error_code _sys_lwcond_queue_wait(ppu_thread& ppu, u32 lwcond_id, u32 lwmutex_id
 			reader_lock lock2(mutex->mutex);
 
 			const bool cond_sleep = std::find(cond->sq.begin(), cond->sq.end(), &ppu) != cond->sq.end();
-			const bool mutex_sleep = std::find(mutex->sq.begin(), mutex->sq.end(), &ppu) != cond->sq.end();
+			const bool mutex_sleep = std::find(mutex->sq.begin(), mutex->sq.end(), &ppu) != mutex->sq.end();
 
 			if (!cond_sleep && !mutex_sleep)
 			{
