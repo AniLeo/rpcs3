@@ -517,6 +517,11 @@ game_boot_result Emulator::Load(const std::string& title_id, bool add_only, bool
 		m_title_id = title_id;
 	}
 
+	if (ar)
+	{
+		(*ar)(m_path);
+	}
+
 	{
 		Init(add_only);
 
@@ -1166,12 +1171,8 @@ game_boot_result Emulator::Load(const std::string& title_id, bool add_only, bool
 		ppu_prx_object ppu_prx;
 		spu_exec_object spu_exec;
 
-		u64 systemtime_dst = 0, timebased_dst = 0;
-
 		if (ar)
 		{
-			systemtime_dst = ar->operator u64();
-			timebased_dst = ar->operator u64();
 			vm::load(*ar);
 			hdd1 = ar->operator std::string();
 		}
@@ -1343,6 +1344,10 @@ game_boot_result Emulator::Load(const std::string& title_id, bool add_only, bool
 
 		if (ar)
 		{
+			u64 systemtime_dst = 0, timebased_dst = 0;
+			systemtime_dst = ar->operator u64();
+			timebased_dst = ar->operator u64();
+
 			g_systemtime_offs = systemtime_dst - get_guest_system_time();
 			g_timebased_offs = timebased_dst - get_timebased_time();
 		}
@@ -1577,10 +1582,12 @@ void Emulator::Stop(bool savestate, bool restart)
 	if (savestate)
 	{
 		// Save them first for maxmimum timing accuracy
-		aro(get_guest_system_time(), get_timebased_time());
+		const u64 times[2]{get_guest_system_time(), get_timebased_time())};
+		ar(m_path);
 		vm::save(aro);
 		aro(vfs::get("/dev_hdd1"));
 		g_fxo->save(aro);
+		aro(times[0], times[1]);
 	}
 
 	g_timebased_offs = 0;
