@@ -17,6 +17,11 @@ sys_vm_t::sys_vm_t(u32 _addr, u32 vsize, lv2_memory_container* ct, u32 psize)
 	g_ids[addr >> 28].release(idm::last_id());
 }
 
+void sys_vm_t::save(cereal_save& ar)
+{
+	ar(ct->id, addr, size, psize);
+}
+
 sys_vm_t::~sys_vm_t()
 {
 	// Free ID
@@ -29,6 +34,17 @@ struct sys_vm_global_t
 {
 	atomic_t<u32> total_vsize = 0;
 };
+
+sys_vm_t::sys_vm_t(cereal_load& ar)
+	: ct(lv2_memory_container::search(ar))
+	, addr(ar)
+	, size(ar)
+	, psize(ar)
+{
+	g_ids[addr >> 28].release(idm::last_id());
+	g_fxo->need<sys_vm_global_t>();
+	g_fxo->get<sys_vm_global_t>().total_vsize += size;
+}
 
 error_code sys_vm_memory_map(ppu_thread& ppu, u32 vsize, u32 psize, u32 cid, u64 flag, u64 policy, vm::ptr<u32> addr)
 {

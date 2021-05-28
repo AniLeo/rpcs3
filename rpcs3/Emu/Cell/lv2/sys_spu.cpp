@@ -181,7 +181,7 @@ lv2_spu_group::lv2_spu_group(cereal_load& ar) noexcept
 	, max_num(ar)
 	, mem_size(ar)
 	, type(ar) // SPU Thread Group Type
-	, ct(nullptr) // TODO
+	, ct(lv2_memory_container::search(ar))
 	, has_scheduler_context(ar.operator u8())
 	, max_run(ar) // TODO: Recover from setting
 	, init(ar)
@@ -252,7 +252,7 @@ void lv2_spu_group::save(cereal_save& ar)
 	//case SPU_THREAD_GROUP_STATUS_UNKNOWN:
 	}
 
-	ar(name, max_num, mem_size, type, has_scheduler_context, max_run, init, prio, _run_state, exit_status);
+	ar(name, max_num, mem_size, type, ct->id, has_scheduler_context, max_run, init, prio, _run_state, exit_status);
 
 	for (const auto& thread : threads)
 	{

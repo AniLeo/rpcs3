@@ -41,6 +41,9 @@ struct sys_vm_t
 	sys_vm_t(u32 addr, u32 vsize, lv2_memory_container* ct, u32 psize);
 	~sys_vm_t();
 
+	sys_vm_t(cereal_load& ar);
+	void save(cereal_save& ar);
+
 	static std::array<atomic_t<u32>, id_count> g_ids;
 
 	static u32 find_id(u32 addr)
