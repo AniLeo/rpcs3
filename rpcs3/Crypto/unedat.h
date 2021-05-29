@@ -19,6 +19,10 @@ struct loaded_npdrm_keys
 	atomic_t<u128> devKlic{};
 	atomic_t<u128> rifKey{};
 	atomic_t<u32> npdrm_fds{0};
+
+	loaded_npdrm_keys() = default;
+	loaded_npdrm_keys(cereal_load& ar);
+	void save(cereal_save& ar);
 };
 
 struct NPD_HEADER

@@ -188,6 +188,18 @@ u64 lv2_file::op_write(const fs::file& file, vm::cptr<void> buf, u64 size)
 	return result;
 }
 
+extern void init_npdrm_keys(cereal_load* ar)
+{
+	if (ar)
+	{
+		g_fxo->init<loaded_npdrm_keys>(*ar);
+	}
+	else
+	{
+		g_fxo->init<loaded_npdrm_keys>();
+	}
+}
+
 lv2_file::lv2_file(cereal_load& ar)
 	: lv2_fs_object(ar)
 	, mode(ar)
@@ -210,10 +222,9 @@ lv2_file::lv2_file(cereal_load& ar)
 	file = std::move(res.file);
 	real_path = std::move(res.real_path);
 
-	usz seek_pos = 0;
-	ar(seek_pos);
+	g_fxo->get<loaded_npdrm_keys>().npdrm_fds.raw() += type != lv2_file_type::regular;
 
-	file.seek(seek_pos);
+	file.seek(ar);
 }
 
 void lv2_file::save(cereal_save& ar)
@@ -231,6 +242,22 @@ void lv2_dir::save(cereal_save& ar)
 {
 	// TODO
 	ar(name);
+}
+
+// TODO: Proper serialization
+static auto& as_array(atomic_t<u128>& value)
+{
+	return reinterpret_cast<u8(&)[16]>(value);
+}
+
+loaded_npdrm_keys::loaded_npdrm_keys(cereal_load& ar)
+{
+	ar(as_array(devKlic), as_array(rifKey));
+}
+
+void loaded_npdrm_keys::save(cereal_save& ar)
+{
+	ar(as_array(devKlic), as_array(rifKey));
 }
 
 struct lv2_file::file_view : fs::file_base
@@ -339,7 +366,7 @@ error_code sys_fs_test(ppu_thread&, u32 arg1, u32 arg2, vm::ptr<u32> arg3, u32 a
 	return CELL_OK;
 }
 
-lv2_file::open_raw_result_t lv2_file::open_raw(const std::string& local_path, s32 flags, s32 /*mode*/, lv2_file_type type, const lv2_fs_mount_point* mp)
+lv2_file::open_raw_result_t lv2_file::open_raw(const std::string& local_path, s32 flags, s32 /*mode*/, lv2_file_type type, const lv2_fs_mount_point* mp, u128 klic)
 {
 	// TODO: other checks for path
 

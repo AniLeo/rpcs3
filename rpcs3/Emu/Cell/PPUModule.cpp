@@ -1681,6 +1681,8 @@ bool ppu_load_exec(const ppu_exec_object& elf, cereal_load* ar)
 		mem_size += 0x800000;
 	}
 
+	void init_npdrm_keys(cereal_load* ar);
+
 	if (ar)
 	{
 		// Order is important!
@@ -1688,6 +1690,7 @@ bool ppu_load_exec(const ppu_exec_object& elf, cereal_load* ar)
 		g_fxo->init<id_manager::id_map<lv2_memory_container>>(*ar);
 		g_fxo->init<id_manager::id_map<named_thread<ppu_thread>>>(*ar);
 		g_fxo->init<id_manager::id_map<lv2_obj>>(*ar);
+		init_npdrm_keys(ar);
 	}
 	else
 	{
@@ -1695,6 +1698,7 @@ bool ppu_load_exec(const ppu_exec_object& elf, cereal_load* ar)
 		g_fxo->init<id_manager::id_map<lv2_memory_container>>();
 		g_fxo->init<id_manager::id_map<named_thread<ppu_thread>>>();
 		g_fxo->init<id_manager::id_map<lv2_obj>>();
+		init_npdrm_keys(ar);
 	}
 
 	// Initialize process
@@ -1714,9 +1718,9 @@ bool ppu_load_exec(const ppu_exec_object& elf, cereal_load* ar)
 		load_libs.emplace("libsysmodule.sprx");
 	}
 
-	if (g_ps3_process_info.get_cellos_appname() == "vsh.self"sv)
+	if (ar || g_ps3_process_info.get_cellos_appname() == "vsh.self"sv)
 	{
-		// Cannot be used with vsh.self (it self-manages itself)
+		// Cannot be used with vsh.self or savestates (they self-manage itself)
 		load_libs.clear();
 	}
 
@@ -1742,10 +1746,7 @@ bool ppu_load_exec(const ppu_exec_object& elf, cereal_load* ar)
 			{
 				ppu_loader.warning("Loading library: %s", name);
 
-				auto prx = !ar ? ppu_load_prx(obj, lle_dir + name, 0, nullptr) : idm::select<lv2_obj, lv2_prx>([&](u32, lv2_prx& prx)
-				{
-					return Emu.GetCallbacks().resolve_path(prx.path) == Emu.GetCallbacks().resolve_path(lle_dir + name);
-				}).ptr;
+				auto prx = ppu_load_prx(obj, lle_dir + name, 0, nullptr);
 
 				if (prx->funcs.empty())
 				{
@@ -1796,7 +1797,7 @@ bool ppu_load_exec(const ppu_exec_object& elf, cereal_load* ar)
 		return true;
 	}
 
-	if (ppc_seg != 0x0 && !ar)
+	if (ppc_seg != 0x0)
 	{
 		if (ppc_seg != 0x1)
 		{
