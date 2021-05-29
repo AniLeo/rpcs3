@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "VFS.h"
 #include "Utilities/bin_patch.h"
 #include "Emu/Memory/vm.h"
@@ -233,6 +233,7 @@ void Emulator::Init(bool add_only)
 
 	make_path_verbose(fs::get_cache_dir() + "shaderlog/");
 	make_path_verbose(fs::get_cache_dir() + "spu_progs/");
+	make_path_verbose(fs::get_cache_dir() + "/savestates/");
 	make_path_verbose(fs::get_config_dir() + "captures/");
 
 	if (add_only)
@@ -424,7 +425,7 @@ bool Emulator::BootRsxCapture(const std::string& path)
 
 game_boot_result Emulator::BootGame(const std::string& path, const std::string& title_id, bool direct, bool add_only, bool force_global_config, const std::string& savestate)
 {
-	if (!fs::exists(path))
+	if (!fs::exists(path) && !fs::is_file(savestate))
 	{
 		return game_boot_result::invalid_file_or_folder;
 	}
@@ -442,7 +443,7 @@ game_boot_result Emulator::BootGame(const std::string& path, const std::string& 
 
 	cereal_load* ar = ari ? ari.operator->() : nullptr; 
 
-	if (direct || fs::is_file(path))
+	if (direct || fs::is_file(path) || ar)
 	{
 		m_path = path;
 		return Load(title_id, add_only, force_global_config, false, ar);
@@ -465,7 +466,7 @@ game_boot_result Emulator::BootGame(const std::string& path, const std::string& 
 		if (fs::is_file(elf))
 		{
 			m_path = elf;
-			result = Load(title_id, add_only, force_global_config, false, ar);
+			result = Load(title_id, add_only, force_global_config, false);
 			break;
 		}
 	}
@@ -486,7 +487,7 @@ game_boot_result Emulator::BootGame(const std::string& path, const std::string& 
 				if (fs::is_file(elf))
 				{
 					m_path = elf;
-					if (const auto err = Load(title_id, add_only, force_global_config, false, ar); err != game_boot_result::no_errors)
+					if (const auto err = Load(title_id, add_only, force_global_config, false); err != game_boot_result::no_errors)
 					{
 						result = err;
 					}
@@ -505,7 +506,6 @@ void Emulator::SetForceBoot(bool force_boot)
 game_boot_result Emulator::Load(const std::string& title_id, bool add_only, bool force_global_config, bool is_disc_patch, cereal_load* ar)
 {
 	m_force_global_config = force_global_config;
-	const std::string resolved_path = GetCallbacks().resolve_path(m_path);
 
 	if (!IsStopped())
 	{
@@ -521,6 +521,8 @@ game_boot_result Emulator::Load(const std::string& title_id, bool add_only, bool
 	{
 		(*ar)(m_path);
 	}
+
+	const std::string resolved_path = GetCallbacks().resolve_path(m_path);
 
 	{
 		Init(add_only);
@@ -1640,7 +1642,8 @@ void Emulator::Stop(bool savestate, bool restart)
 
 		if (savestate)
 		{
-			const std::string path = fs::get_cache_dir() + "/RPCS3.SAVESTAT";
+			const std::string path = fs::get_cache_dir() + "/savestates/" + (m_title_id.empty() ? m_path.substr(m_path.find_last_of(fs::delim) + 1) : m_title_id) + ".SAVESTAT";
+
 			fs::pending_file file(path);
 
 			if (!file.file || (file.file.write(save_data), !file.commit()))

@@ -439,6 +439,36 @@ void main_window::BootElf()
 	Boot(path, "", true);
 }
 
+void main_window::BootSavestate()
+{
+	bool stopped = false;
+
+	if (Emu.IsRunning())
+	{
+		Emu.Pause();
+		stopped = true;
+	}
+
+	const QString file_path = QFileDialog::getOpenFileName(this, tr("Select Savestate To Boot"), qstr(fs::get_cache_dir() + "/savestates/"), tr(
+		"Savestate files (*.SAVESTAT);;"
+		"All files (*.*)"),
+		Q_NULLPTR, QFileDialog::DontResolveSymlinks);
+
+	if (file_path.isEmpty())
+	{
+		if (stopped)
+		{
+			Emu.Resume();
+		}
+		return;
+	}
+
+	const std::string path = sstr(QFileInfo(file_path).absoluteFilePath());
+
+	gui_log.notice("Booting from savestate...");
+	Boot("", "", true, false, false, path);
+}
+
 void main_window::BootGame()
 {
 	bool stopped = false;
@@ -1913,6 +1943,8 @@ void main_window::CreateConnects()
 	{
 		g_user_asked_for_frame_capture = true;
 	});
+
+	connect(ui->bootSavestateAct, &QAction::triggered, this, &main_window::BootSavestate);
 
 	connect(ui->addGamesAct, &QAction::triggered, this, [this]()
 	{
