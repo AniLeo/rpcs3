@@ -101,6 +101,16 @@ void lv2_memory::save(cereal_save& ar)
 	ar(counter);
 }
 
+page_fault_notification_entries::page_fault_notification_entries(cereal_load& ar)
+	: entries(ar)
+{
+}
+
+void page_fault_notification_entries::save(cereal_save& ar)
+{
+	ar(entries);
+}
+
 template <bool exclusive = false>
 error_code create_lv2_shm(bool pshared, u64 ipc_key, u64 size, u32 align, u64 flags, lv2_memory_container* ct)
 {

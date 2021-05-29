@@ -61,6 +61,12 @@ struct page_fault_notification_entry
 	u32 start_addr; // Starting address of region to monitor.
 	u32 event_queue_id; // Queue to be notified.
 	u32 port_id; // Port used to notify the queue.
+
+	template <typename Archive>
+	void serialize(Archive& ar)
+	{
+		ar(start_addr, event_queue_id, port_id);
+	}
 };
 
 // Used to hold list of queues to be notified on page fault event.
@@ -68,6 +74,10 @@ struct page_fault_notification_entries
 {
 	std::vector<page_fault_notification_entry> entries;
 	shared_mutex mutex;
+
+	page_fault_notification_entries() = default;
+	page_fault_notification_entries(cereal_load& ar);
+	void save(cereal_save& ar);
 };
 
 struct page_fault_event_entries
