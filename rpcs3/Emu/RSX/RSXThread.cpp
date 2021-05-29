@@ -433,6 +433,16 @@ namespace rsx
 		ar(display_buffers, display_buffers_count, current_display_buffer);
 	}
 
+	avconf::avconf(cereal_load& ar)
+	{
+		ar(reinterpret_cast<u8(&)[sizeof(avconf)]>(*this));
+	}
+
+	void avconf::save(cereal_save& ar)
+	{
+		ar(reinterpret_cast<u8(&)[sizeof(avconf)]>(*this));
+	}
+
 	void thread::capture_frame(const std::string &name)
 	{
 		frame_trace_data::draw_state draw_state{};

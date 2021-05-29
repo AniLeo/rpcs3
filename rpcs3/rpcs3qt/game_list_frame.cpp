@@ -1,4 +1,4 @@
-﻿#include "game_list_frame.h"
+#include "game_list_frame.h"
 #include "qt_utils.h"
 #include "settings_dialog.h"
 #include "pad_settings_dialog.h"
@@ -901,7 +901,7 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 		QAction* boot_state = menu.addAction(is_current_running_game
 			? tr("&Reboot with savestate")
 			: tr("&Boot with savestate"));
-		connect(boot_state, &QAction::triggered, [this, gameinfo, state]
+		connect(boot_state, &QAction::triggered, [this, gameinfo, sstate]
 		{
 			sys_log.notice("Booting from savestate per context menu...");
 			Q_EMIT RequestBoot(gameinfo, false, sstate);
