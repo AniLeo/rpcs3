@@ -1273,7 +1273,7 @@ lv2_socket::lv2_socket(cereal_load& ar)
 
 void lv2_socket::save(cereal_save& ar)
 {
-	ar(so_nbio, so_error, so_tcp_maxseg, type, family);
+	ar(so_nbio, so_error, so_tcp_maxseg, type, family, protocol);
 #ifdef _WIN32
 	ar(so_reuseaddr, so_reuseport);
 #else
