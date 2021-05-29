@@ -16,6 +16,8 @@ class np_handler
 {
 public:
 	np_handler();
+	np_handler(cereal_load& ar);
+	void save(cereal_save& ar);
 
 	const std::array<u8, 6>& get_ether_addr() const;
 	const std::string& get_hostname() const;
