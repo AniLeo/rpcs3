@@ -330,7 +330,7 @@ struct lv2_socket final
 		__bitset_enum_max
 	};
 
-	lv2_socket(socket_type s, s32 s_type, s32 family);
+	lv2_socket(socket_type s, s32 s_type, s32 family, s32 protocol);
 	lv2_socket(cereal_load& ar);
 	void save(cereal_save& ar);
 	bool savable() const { return socket && family && type; } // TODO
@@ -360,6 +360,7 @@ struct lv2_socket final
 
 	const lv2_socket_type type;
 	const lv2_socket_family family;
+	const u32 protocol;
 
 	// SYS_NET_SOCK_DGRAM_P2P and SYS_NET_SOCK_STREAM_P2P socket specific information
 	struct p2p_i

@@ -725,7 +725,7 @@ struct nt_p2p_port
 			send_hdr.seq      = rand();
 
 			// Create new socket
-			auto sock_lv2               = std::make_shared<lv2_socket>(0, SYS_NET_SOCK_STREAM_P2P, SYS_NET_AF_INET);
+			auto sock_lv2               = std::make_shared<lv2_socket>(0, SYS_NET_SOCK_STREAM_P2P, SYS_NET_AF_INET, 0);
 			sock_lv2->socket            = sock->socket;
 			sock_lv2->p2p.port          = sock->p2p.port;
 			sock_lv2->p2p.vport         = sock->p2p.vport;
@@ -1189,8 +1189,11 @@ std::vector<std::pair<std::pair<u32, u16>, std::vector<u8>>> get_sign_msgs()
 }
 
 
-lv2_socket::lv2_socket(lv2_socket::socket_type s, s32 s_type, s32 family)
-	: socket(s), type{s_type}, family{family}
+lv2_socket::lv2_socket(lv2_socket::socket_type s, s32 s_type, s32 family, s32 protocol)
+	: socket(s)
+	, type{s_type}
+	, family{family}
+	, protocol(protocol)
 {
 	if (socket)
 	{
@@ -1204,12 +1207,56 @@ lv2_socket::lv2_socket(lv2_socket::socket_type s, s32 s_type, s32 family)
 	}
 }
 
+lv2_socket::socket_type new_lv2_socket(s32 family, s32 type, s32 protocol)
+{
+	constexpr int native_domain = AF_INET;
+
+	const int native_type =
+		type == SYS_NET_SOCK_STREAM ? SOCK_STREAM :
+		type == SYS_NET_SOCK_DGRAM ? SOCK_DGRAM : SOCK_RAW;
+
+	int native_proto =
+		protocol == SYS_NET_IPPROTO_IP ? IPPROTO_IP :
+		protocol == SYS_NET_IPPROTO_ICMP ? IPPROTO_ICMP :
+		protocol == SYS_NET_IPPROTO_IGMP ? IPPROTO_IGMP :
+		protocol == SYS_NET_IPPROTO_TCP ? IPPROTO_TCP :
+		protocol == SYS_NET_IPPROTO_UDP ? IPPROTO_UDP :
+		protocol == SYS_NET_IPPROTO_ICMPV6 ? IPPROTO_ICMPV6 : 0;
+
+	// TODO: native_domain is always AF_INET
+	if (native_domain == AF_UNSPEC && type == SYS_NET_SOCK_DGRAM)
+	{
+		// Windows gets all errory if you try a unspec socket with protocol 0
+		native_proto = IPPROTO_UDP;
+	}
+
+	const lv2_socket::socket_type native_socket = ::socket(native_domain, native_type, native_proto);
+
+	if (native_socket == -1)
+	{
+		return -1;
+	}
+
+	const u32 default_RCVBUF = (type == SYS_NET_SOCK_STREAM ? 65535 : 9216);
+
+	if (setsockopt(native_socket, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&default_RCVBUF), sizeof(default_RCVBUF)) != 0)
+		sys_net.error("Error setting defalult SO_RCVBUF on sys_net_bnet_socket socket");
+
+	constexpr u32 default_SNDBUF = 131072;
+
+	if (setsockopt(native_socket, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&default_SNDBUF), sizeof(default_SNDBUF)) != 0)
+		sys_net.error("Error setting default SO_SNDBUF on sys_net_bnet_socket socket");
+
+	return native_socket;
+}
+
 lv2_socket::lv2_socket(cereal_load& ar)
 	: so_nbio(ar)
 	, so_error(ar)
 	, so_tcp_maxseg(ar)
 	, type(ar)
 	, family(ar)
+	, protocol(ar)
 #ifdef _WIN32
 	, so_reuseaddr(ar)
 	, so_reuseport(ar)
@@ -1220,7 +1267,8 @@ lv2_socket::lv2_socket(cereal_load& ar)
 	ar.operator u32(), ar.operator u32();
 #endif
 
-
+	socket = new_lv2_socket(family, type, protocol);
+	ensure(socket + 1);
 }
 
 void lv2_socket::save(cereal_save& ar)
@@ -1409,7 +1457,7 @@ error_code sys_net_bnet_accept(ppu_thread& ppu, s32 s, vm::ptr<sys_net_sockaddr>
 		return not_an_error(p2ps_result);
 	}
 
-	auto newsock = std::make_shared<lv2_socket>(native_socket, 0, 0);
+	auto newsock = std::make_shared<lv2_socket>(native_socket, 0, 0, 0);
 
 	result = idm::import_existing<lv2_socket>(newsock);
 
@@ -3092,42 +3140,15 @@ error_code sys_net_bnet_socket(ppu_thread& ppu, s32 family, s32 type, s32 protoc
 
 	if (type != SYS_NET_SOCK_DGRAM_P2P && type != SYS_NET_SOCK_STREAM_P2P)
 	{
-		const int native_domain = AF_INET;
-
-		const int native_type =
-			type == SYS_NET_SOCK_STREAM ? SOCK_STREAM :
-			type == SYS_NET_SOCK_DGRAM ? SOCK_DGRAM : SOCK_RAW;
-
-		int native_proto =
-			protocol == SYS_NET_IPPROTO_IP ? IPPROTO_IP :
-			protocol == SYS_NET_IPPROTO_ICMP ? IPPROTO_ICMP :
-			protocol == SYS_NET_IPPROTO_IGMP ? IPPROTO_IGMP :
-			protocol == SYS_NET_IPPROTO_TCP ? IPPROTO_TCP :
-			protocol == SYS_NET_IPPROTO_UDP ? IPPROTO_UDP :
-			protocol == SYS_NET_IPPROTO_ICMPV6 ? IPPROTO_ICMPV6 : 0;
-
-		// TODO: native_domain is always AF_INET
-		if (native_domain == AF_UNSPEC && type == SYS_NET_SOCK_DGRAM)
-		{
-			// Windows gets all errory if you try a unspec socket with protocol 0
-			native_proto = IPPROTO_UDP;
-		}
-
-		native_socket = ::socket(native_domain, native_type, native_proto);
+		native_socket = new_lv2_socket(family, type, protocol);
 
 		if (native_socket == -1)
 		{
 			return -get_last_error(false);
 		}
-		u32 default_RCVBUF = (type==SYS_NET_SOCK_STREAM) ? 65535 : 9216;
-		if (setsockopt(native_socket, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&default_RCVBUF), sizeof(default_RCVBUF)) != 0)
-			sys_net.error("Error setting defalult SO_RCVBUF on sys_net_bnet_socket socket");
-		u32 default_SNDBUF = 131072;
-		if (setsockopt(native_socket, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&default_SNDBUF), sizeof(default_SNDBUF)) != 0)
-			sys_net.error("Error setting default SO_SNDBUF on sys_net_bnet_socket socket");
 	}
 
-	const auto sock_lv2 = std::make_shared<lv2_socket>(native_socket, type, family);
+	const auto sock_lv2 = std::make_shared<lv2_socket>(native_socket, type, family, protocol);
 	if (type == SYS_NET_SOCK_STREAM_P2P)
 	{
 		sock_lv2->p2p.port = 3658; // Default value if unspecified later
