@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "sys_sync.h"
 #include "sys_fs.h"
 
@@ -366,7 +366,7 @@ error_code sys_fs_test(ppu_thread&, u32 arg1, u32 arg2, vm::ptr<u32> arg3, u32 a
 	return CELL_OK;
 }
 
-lv2_file::open_raw_result_t lv2_file::open_raw(const std::string& local_path, s32 flags, s32 /*mode*/, lv2_file_type type, const lv2_fs_mount_point* mp, u128 klic)
+lv2_file::open_raw_result_t lv2_file::open_raw(const std::string& local_path, s32 flags, s32 /*mode*/, lv2_file_type type, const lv2_fs_mount_point* mp)
 {
 	// TODO: other checks for path
 

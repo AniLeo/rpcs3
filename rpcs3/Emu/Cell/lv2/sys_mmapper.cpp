@@ -102,8 +102,8 @@ void lv2_memory::save(cereal_save& ar)
 }
 
 page_fault_notification_entries::page_fault_notification_entries(cereal_load& ar)
-	: entries(ar)
 {
+	ar(entries);
 }
 
 void page_fault_notification_entries::save(cereal_save& ar)

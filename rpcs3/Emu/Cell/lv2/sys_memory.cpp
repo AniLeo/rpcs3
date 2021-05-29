@@ -55,14 +55,14 @@ struct sys_memory_address_table
 
 	sys_memory_address_table() = default;
 
-	sys_memory_address_table(cereal_load& ar, stx::manual_typemap<void, 0x20'00000, 128>& fxo)
+	sys_memory_address_table(cereal_load& ar)
 	{
 		// First: address, second: conatiner ID (SYS_MEMORY_CONTAINER_ID_INVALID for global FXO memory container)
 		std::map<u16, u32> mm = ar;
 
 		for (const auto& [addr, id] : mm)
 		{
-			addrs[addr] = id != umax ? idm::check_unlocked<lv2_memory_container>(id) : &fxo.get<lv2_memory_container>();
+			addrs[addr] = ensure(lv2_memory_container::search(id));
 		}
 	}
 

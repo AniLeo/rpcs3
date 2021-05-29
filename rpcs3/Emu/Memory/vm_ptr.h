@@ -280,6 +280,12 @@ namespace vm
 			return m_addr;
 		}
 
+		template <class Archive>
+		void serialize(Archive& ar)
+		{
+			ar(m_addr);
+		}
+	
 		// Callback; defined in PPUCallback.h, passing context is mandatory
 		RT operator()(ppu_thread& ppu, T... args) const;
 		const ppu_func_opd_t& opd() const;
