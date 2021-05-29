@@ -5434,6 +5434,7 @@ public:
 			spu_runtime::g_escape(_spu);
 		}
 
+		static_cast<void>(_spu->test_stopped());
 		return static_cast<u32>(result & 0xffffffff);
 	}
 
@@ -5451,6 +5452,7 @@ public:
 		{
 			_spu->state += cpu_flag::wait;
 			std::this_thread::yield();
+			static_cast<void>(_spu->test_stopped());
 		}
 
 		return res;
