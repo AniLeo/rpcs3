@@ -58,7 +58,7 @@ struct sys_memory_address_table
 	sys_memory_address_table(cereal_load& ar)
 	{
 		// First: address, second: conatiner ID (SYS_MEMORY_CONTAINER_ID_INVALID for global FXO memory container)
-		std::map<u16, u32> mm = ar;
+		std::unordered_map<u16, u32> mm = ar;
 
 		for (const auto& [addr, id] : mm)
 		{
@@ -68,7 +68,7 @@ struct sys_memory_address_table
 
 	void save(cereal_save& ar)
 	{
-		std::map<u16, u32> mm;
+		std::unordered_map<u16, u32> mm;
 
 		for (auto& ctr : addrs)
 		{
