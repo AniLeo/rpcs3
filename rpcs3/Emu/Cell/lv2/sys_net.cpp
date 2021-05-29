@@ -2261,7 +2261,7 @@ error_code sys_net_bnet_recvfrom(ppu_thread& ppu, s32 s, vm::ptr<void> buf, u32 
 
 	s32 type = 0;
 
-	const auto sock = idm::check<lv2_socket>(s, [&](lv2_socket& sock)
+	const auto sock = idm::get<lv2_socket>(s, [&](lv2_socket& sock)
 	{
 		type = sock.type;
 		std::lock_guard lock(sock.mutex);
@@ -2482,14 +2482,22 @@ error_code sys_net_bnet_recvfrom(ppu_thread& ppu, s32 s, vm::ptr<void> buf, u32 
 	{
 		while (auto state = ppu.state.fetch_sub(cpu_flag::signal))
 		{
-			if (is_stopped(state))
-			{
-				return {};
-			}
-
 			if (state & cpu_flag::signal)
 			{
 				break;
+			}
+
+			if (is_stopped(state))
+			{
+				std::lock_guard lock(sock->mutex);
+
+				if (std::find_if(sock->queue.begin(), sock->queue.end(), [&](const auto& entry) { return entry.first == ppu.id; }) == sock->queue.end())
+				{
+					break;
+				}
+
+				ppu.incomplete_syscall_flag = true;
+				return {};
 			}
 
 			thread_ctrl::wait_on(ppu.state, state);
