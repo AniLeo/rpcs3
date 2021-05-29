@@ -5436,7 +5436,7 @@ public:
 
 		if (_spu->test_stopped())
 		{
-			//_spu->pc += 4;
+			_spu->pc += 4;
 			spu_runtime::g_escape(_spu);
 		}
 
@@ -5729,7 +5729,7 @@ public:
 
 		if (_spu->test_stopped())
 		{
-			//_spu->pc += 4;
+			_spu->pc += 4;
 			spu_runtime::g_escape(_spu);
 		}
 	}
