@@ -1577,12 +1577,15 @@ void Emulator::Stop(bool savestate, bool restart)
 	cpu_thread::stop_all();
 	g_fxo->stop_all();
 
+	// Save them first for maxmimum timing accuracy
+	const u64 times[2]{get_guest_system_time(), get_timebased_time()};
+
+	stop_watchdog = thread_state::aborting;
+
 	sys_log.notice("All threads have been stopped.");
 
 	if (savestate)
 	{
-		// Save them first for maxmimum timing accuracy
-		const u64 times[2]{get_guest_system_time(), get_timebased_time()};
 		aro(m_path);
 		vm::save(aro);
 		aro(vfs::get("/dev_hdd1"));
@@ -1627,8 +1630,6 @@ void Emulator::Stop(bool savestate, bool restart)
 	});
 
 	sys_log.notice("Atomic wait hashtable stats: [in_use=%u, used=%u, max_collision_weight=%u, total_collisions=%u]", aw_refs, aw_used, aw_colm, aw_colc);
-
-	stop_watchdog = thread_state::aborting;
 
 	m_stop_ctr++;
 	m_stop_ctr.notify_all();
