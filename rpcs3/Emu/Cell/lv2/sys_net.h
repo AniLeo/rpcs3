@@ -331,6 +331,9 @@ struct lv2_socket final
 	};
 
 	lv2_socket(socket_type s, s32 s_type, s32 family);
+	lv2_socket(cereal_load& ar);
+	void save(cereal_save& ar);
+	bool savable() const { return socket && family && type; } // TODO
 	~lv2_socket();
 
 	shared_mutex mutex;

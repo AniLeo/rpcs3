@@ -1204,6 +1204,35 @@ lv2_socket::lv2_socket(lv2_socket::socket_type s, s32 s_type, s32 family)
 	}
 }
 
+lv2_socket::lv2_socket(cereal_load& ar)
+	: so_nbio(ar)
+	, so_error(ar)
+	, so_tcp_maxseg(ar)
+	, type(ar)
+	, family(ar)
+#ifdef _WIN32
+	, so_reuseaddr(ar)
+	, so_reuseport(ar)
+{
+#else
+{
+	// Try to match structure between different platforms
+	ar.operator u32(), ar.operator u32();
+#endif
+
+
+}
+
+void lv2_socket::save(cereal_save& ar)
+{
+	ar(so_nbio, so_error, so_tcp_maxseg, type, family);
+#ifdef _WIN32
+	ar(so_reuseaddr, so_reuseport);
+#else
+	ar(u32{0}, u32{0});
+#endif
+}
+
 lv2_socket::~lv2_socket()
 {
 	if (type != SYS_NET_SOCK_DGRAM_P2P && type != SYS_NET_SOCK_STREAM_P2P)
