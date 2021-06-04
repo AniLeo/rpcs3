@@ -1266,6 +1266,10 @@ game_boot_result Emulator::Load(const std::string& title_id, bool add_only, bool
 				{
 					g_fxo->init<id_manager::id_map<named_thread<spu_thread>>>(*ar);
 				}
+				else
+				{
+					g_fxo->init<id_manager::id_map<named_thread<spu_thread>>>();
+				}
 
 				g_fxo->init(false, ar);
 				GetCallbacks().init_gs_render(ar);
