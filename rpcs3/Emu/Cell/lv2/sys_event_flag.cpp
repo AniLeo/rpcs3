@@ -413,6 +413,16 @@ error_code sys_event_flag_cancel(ppu_thread& ppu, u32 id, vm::ptr<u32> num)
 	{
 		std::lock_guard lock(flag->mutex);
 
+		for (auto cpu : flag->sq)
+		{
+			if (static_cast<ppu_thread*>(cpu)->incomplete_syscall_flag)
+			{
+				ppu.incomplete_syscall_flag = true;
+				ppu.state += cpu_flag::exit;
+				return {};
+			}
+		}
+
 		// Get current pattern
 		const u64 pattern = flag->pattern;
 
