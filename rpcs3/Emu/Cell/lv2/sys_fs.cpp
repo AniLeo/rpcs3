@@ -214,8 +214,8 @@ lv2_file::lv2_file(cereal_load& ar)
 	switch (type)
 	{
 	case lv2_file_type::regular: break;
-	case lv2_file_type::sdata: arg = 0x18000000010; break; // TODO: Fix
-	case lv2_file_type::edata: arg = 0x2; break;
+	case lv2_file_type::sdata: arg = 0x18000000010, size = 8; break; // TODO: Fix
+	case lv2_file_type::edata: arg = 0x2, size = 8; break;
 	}
 
 	open_result_t res = lv2_file::open(name.data(), flags & CELL_FS_O_ACCMODE, mode, size ? &arg : nullptr, size);
