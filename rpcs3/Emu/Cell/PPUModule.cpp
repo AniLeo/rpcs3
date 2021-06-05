@@ -1380,7 +1380,7 @@ bool ppu_load_exec(const ppu_exec_object& elf, cereal_load* ar)
 			{
 				if (!vm::check_addr(addr, vm::page_readable, size))
 				{
-					ppu_loader.fatal("ppu_load_exec(): Archived PPU executable memory has not been found! (addr=0x%x, memsz=0x%x)", addr, size); // TODO
+					ppu_loader.fatal("ppu_load_exec(): Archived PPU executable memory has not been found! (addr=0x%x, memsz=0x%x)", addr, size);
 					return false;
 				}
 			}
@@ -1993,7 +1993,15 @@ std::pair<std::shared_ptr<lv2_overlay>, CellError> ppu_load_overlay(const ppu_ex
 			if (prog.bin.size() > size || prog.bin.size() != prog.p_filesz)
 				fmt::throw_exception("Invalid binary size (0x%llx, memsz=0x%x)", prog.bin.size(), size);
 
-			if (!vm::get(vm::any, 0x30000000)->falloc(addr, size))
+			if (ar)
+			{
+				if (!vm::check_addr(addr, vm::page_readable, size))
+				{
+					ppu_loader.fatal("ppu_load_overlay(): Archived PPU overlay memory has not been found! (addr=0x%x, memsz=0x%x)", addr, size);
+					return {nullptr, CELL_EABORT};
+				}
+			}
+			else if (!vm::get(vm::any, 0x30000000)->falloc(addr, size))
 			{
 				ppu_loader.error("ppu_load_overlay(): vm::falloc() failed (addr=0x%x, memsz=0x%x)", addr, size);
 
