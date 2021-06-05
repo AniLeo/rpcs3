@@ -520,6 +520,9 @@ game_boot_result Emulator::Load(const std::string& title_id, bool add_only, bool
 	if (ar)
 	{
 		(*ar)(m_path);
+
+		klic.emplace_back(std::bit_cast<u128>(ar->operator std::array<u8, 16>()));
+		if (!klic[0]) klic.clear();
 	}
 
 	const std::string resolved_path = GetCallbacks().resolve_path(m_path);
@@ -1593,6 +1596,7 @@ void Emulator::Stop(bool savestate, bool restart)
 	if (savestate)
 	{
 		aro(m_path);
+		aro(klic.empty() ? std::array<u8, 16>{} : std::bit_cast<std::array<u8, 16>>(klic[0]));
 		vm::save(aro);
 		aro(vfs::get("/dev_hdd1"));
 		g_fxo->save(aro);
