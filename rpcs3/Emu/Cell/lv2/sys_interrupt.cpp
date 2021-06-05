@@ -10,18 +10,45 @@
 LOG_CHANNEL(sys_interrupt);
 
 lv2_int_tag::lv2_int_tag() noexcept
-	: id(idm::last_id())
+	: lv2_obj{1}
+	, id(idm::last_id())
 {
-	exists.release(1);
+}
+
+
+lv2_int_tag::lv2_int_tag(cereal_load& ar) noexcept
+	: lv2_obj{1}
+	, id(idm::last_id())
+	, handler(idm::get_unlocked<lv2_obj, lv2_int_serv>(ar))
+{
+}
+
+void lv2_int_tag::save(cereal_save& ar)
+{
+	ar(lv2_obj::check(handler) ? handler->id : 0);
 }
 
 lv2_int_serv::lv2_int_serv(const std::shared_ptr<named_thread<ppu_thread>>& thread, u64 arg1, u64 arg2) noexcept
-	: id(idm::last_id())
+	: lv2_obj{1}
+	, id(idm::last_id())
 	, thread(thread)
 	, arg1(arg1)
 	, arg2(arg2)
 {
-	exists.release(1);
+}
+
+lv2_int_serv::lv2_int_serv(cereal_load& ar) noexcept
+	: lv2_obj{1}
+	, id(idm::last_id())
+	, thread(idm::get_unlocked<named_thread<ppu_thread>>(ar))
+	, arg1(ar)
+	, arg2(ar)
+{
+}
+
+void lv2_int_serv::save(cereal_save& ar)
+{
+	ar(thread->id, arg1, arg2);
 }
 
 void lv2_int_serv::exec() const
