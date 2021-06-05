@@ -601,6 +601,11 @@ namespace rsx
 		is_inited = true;
 		is_inited.notify_all();
 
+		while (!is_stopped() && !lv2_obj::is_scheduler_ready())
+		{
+			thread_ctrl::wait_for(1000);
+		}
+
 		if (!zcull_ctrl)
 		{
 			//Backend did not provide an implementation, provide NULL object
@@ -610,7 +615,7 @@ namespace rsx
 		performance_counters.state = FIFO_state::empty;
 
 		// Wait for startup (TODO)
-		while (m_rsx_thread_exiting || !lv2_obj::is_scheduler_ready())
+		while (m_rsx_thread_exiting)
 		{
 			// Wait for external pause events
 			if (external_interrupt_lock)

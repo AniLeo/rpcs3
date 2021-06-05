@@ -636,7 +636,7 @@ void cell_audio_thread::update_config()
 
 void cell_audio_thread::operator()()
 {
-	while (!lv2_obj::is_scheduler_ready())
+	while (thread_ctrl::state() != thread_state::aborting && !lv2_obj::is_scheduler_ready())
 	{
 		thread_ctrl::wait_for(5000);
 	}

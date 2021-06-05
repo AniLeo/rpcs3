@@ -32,7 +32,7 @@ void lv2_timer_context::save(cereal_save& ar)
 
 void lv2_timer_context::operator()()
 {
-	while (Emu.IsPaused() || !lv2_obj::is_scheduler_ready())
+	while (Emu.IsPaused() || (thread_ctrl::state() != thread_state::aborting && !lv2_obj::is_scheduler_ready()))
 	{
 		thread_ctrl::wait_for(10'000);
 	}
