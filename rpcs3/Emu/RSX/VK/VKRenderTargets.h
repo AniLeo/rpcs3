@@ -101,13 +101,17 @@ namespace vk
 			case driver_vendor::NVIDIA:
 			case driver_vendor::INTEL:
 			case driver_vendor::AMD: // TODO
+				rsx_log.error("DEBUG: return 0");
 				return 0;
+
+			rsx_log.error("DEBUG2");
 
 			// Workaround to force transition to GENERAL to decompress.
 			// Fixes corruption in FBO loops for ANV and RADV.
 			case driver_vendor::ANV:
 				return VK_IMAGE_USAGE_STORAGE_BIT;
 			case driver_vendor::RADV:
+				rsx_log.error("DEBUG: %d, %d", static_cast<int>(vk::get_chip_family()), static_cast<int>(chip_class::AMD_navi1x));
 				// Only needed for GFX10+
 				return (vk::get_chip_family() >= chip_class::AMD_navi1x) ?
 					VK_IMAGE_USAGE_STORAGE_BIT : 0;
