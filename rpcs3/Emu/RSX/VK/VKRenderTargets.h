@@ -192,7 +192,8 @@ namespace vk
 			vk::render_device& device, vk::command_buffer& cmd)
 		{
 			const VkFormat requested_format = vk::get_compatible_depth_surface_format(device.get_formats_support(), format);
-			VkImageUsageFlags usage_flags = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+
+			VkImageUsageFlags usage_flags = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | get_attachment_compression_usage_flags();
 
 			u8 samples;
 			rsx::surface_sample_layout sample_layout;
@@ -209,7 +210,7 @@ namespace vk
 
 			if (samples == 1) [[likely]]
 			{
-				usage_flags |= get_attachment_compression_usage_flags() | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+				usage_flags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 			}
 
 			std::unique_ptr<vk::render_target> ds;
