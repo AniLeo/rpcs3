@@ -186,8 +186,8 @@ struct copy_unmodified_block
 		{
 			// Fast copy
 			const auto data_length = src_pitch_in_block * words_per_block * row_count * depth;
-			rsx_log.error("copy_mipmap_level(dst.size=%d, src.size=%d, words_per_block=%d, width_in_block=%d, row_count=%d, depth=%d, border=%d, dst_pitch_in_block=%d, src_pitch_in_block=%d)", 
-				dst.size(), src.size(), words_per_block, width_in_block, row_count, depth, border, dst_pitch_in_block, src_pitch_in_block);
+			rsx_log.error("copy_mipmap_level(dst.data=0x%p, src.data=0x%p, dst.size=%d, src.size=%d, words_per_block=%d, width_in_block=%d, row_count=%d, depth=%d, border=%d, dst_pitch_in_block=%d, src_pitch_in_block=%d)", 
+				dst.data(), src.data(), dst.size(), src.size(), words_per_block, width_in_block, row_count, depth, border, dst_pitch_in_block, src_pitch_in_block);
 			std::copy_n(src.begin(), std::min<usz>({data_length, src.size(), dst.size()}), dst.begin());
 			return;
 		}
