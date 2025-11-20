@@ -43,6 +43,7 @@ cmake ..                                               \
     -DCMAKE_SHARED_LINKER_FLAGS="${LINKER_FLAG}"       \
     -DCMAKE_AR="$AR"                                   \
     -DCMAKE_RANLIB="$RANLIB"                           \
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo                  \
     -DUSE_SYSTEM_CURL=ON                               \
     -DUSE_SDL=ON                                       \
     -DUSE_SYSTEM_SDL=ON                                \
