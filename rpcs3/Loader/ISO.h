@@ -23,7 +23,7 @@ void unload_iso();
 - Supported ISO encryption type:
   - Decrypted (.iso)
   - 3k3y (decrypted / encrypted) (.iso)
-  - Redump (encrypted) (.iso + .dkey/.key)
+  - Redump (encrypted) (.iso + .dkey / .key)
 
 - Unsupported ISO encryption type:
   - Encrypted split ISO files

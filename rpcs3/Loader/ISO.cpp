@@ -16,10 +16,13 @@ constexpr u64 ISO_SECTOR_SIZE = 2048;
 
 struct iso_sector
 {
-	u64 archive_first_addr = 0;
-	u64 offset = 0;
-	u64 size = 0;
-	std::array<u8, ISO_SECTOR_SIZE> buf {};
+	u64 lba_address;
+	u64 offset;
+	u64 size;
+	u64 address_aligned;
+	u64 offset_aligned;
+	u64 size_aligned;
+	std::array<u8, ISO_SECTOR_SIZE> buf;
 };
 
 bool is_file_iso(const std::string& path)
@@ -62,22 +65,85 @@ static void reset_iv(std::array<u8, 16>& iv, u32 lba)
 	iv[15] = (lba & 0x000000FF) >> 0;
 }
 
-// Main function that will decrypt the sector(s) (needs to be a multiple of ISO_SECTOR_SIZE)
-static void decrypt_data(aes_context& aes, unsigned char* data, u32 sector_count, u32 start_lba)
+// Main function that will decrypt the sector(s)
+static bool decrypt_data(aes_context& aes, u64 offset, unsigned char* buffer, u64 size)
 {
-	// Micro optimization, only ever used by "decrypt_data()"
-	std::array<u8, 16> iv;
-
-	for (u32 i = 0; i < sector_count; ++i)
+	if (size == 0)
 	{
-		reset_iv(iv, start_lba + i);
+		return false;
+	}
 
-		if (aes_crypt_cbc(&aes, AES_DECRYPT, ISO_SECTOR_SIZE, iv.data(), &data[ISO_SECTOR_SIZE * i], &data[ISO_SECTOR_SIZE * i]) != 0)
+	//if ((size % 16) != 0)
+	//{
+	//	sys_log.error("decrypt_data(): Requested ciphertext blocks' size must be a multiple of 16 (%ull)", size);
+	//	return;
+	//}
+
+	u32 cur_sector_lba = static_cast<u32>(offset / ISO_SECTOR_SIZE); // First sector's LBA
+	const u32 sector_count = static_cast<u32>((offset + size - 1) / ISO_SECTOR_SIZE) - cur_sector_lba + 1;
+	const u32 sector_inner_count = sector_count > 2 ? sector_count - 2 : 0; // Remove first and last sector
+	const u64 sector_offset = offset % ISO_SECTOR_SIZE;
+
+	std::array<u8, 16> iv;
+	u64 dec_size;
+	u64 cur_offset;
+	u64 cur_size;
+
+	// If the offset is not at the beginning of a sector, the first 16 bytes in the buffer
+	// represents the IV for decrypting the next data in the buffer.
+	// Otherwise, the IV is based on sector's LBA
+	if (sector_offset != 0)
+	{
+		memcpy(iv.data(), buffer, 16);
+		dec_size = cur_offset = 16;
+	}
+	else
+	{
+		reset_iv(iv, cur_sector_lba);
+		dec_size = cur_offset = 0;
+	}
+
+	cur_size = sector_offset + size <= ISO_SECTOR_SIZE ? size : ISO_SECTOR_SIZE - sector_offset;
+	cur_size -= cur_offset;
+
+	// Partial (or even full) first sector
+	if (aes_crypt_cbc(&aes, AES_DECRYPT, cur_size, iv.data(), &buffer[cur_offset], &buffer[cur_offset]) != 0)
+	{
+		sys_log.error("decrypt_data(): Error decrypting data on first sector read");
+		return false;
+	}
+
+	dec_size += cur_size;
+	cur_offset += cur_size;
+
+	// Inner sector(s), if any
+	for (u32 i = 0; i < sector_inner_count; i++)
+	{
+		reset_iv(iv, ++cur_sector_lba); // Next sector's IV
+
+		if (aes_crypt_cbc(&aes, AES_DECRYPT, ISO_SECTOR_SIZE, iv.data(), &buffer[cur_offset], &buffer[cur_offset]) != 0)
 		{
-			sys_log.error("decrypt_data(): Error decrypting data (decrypt_data() > aes_crypt_cbc())");
-			return;
+			sys_log.error("decrypt_data(): Error decrypting data on inner sector(s) read");
+			return false;
+		}
+
+		dec_size += ISO_SECTOR_SIZE;
+		cur_offset += ISO_SECTOR_SIZE;
+	}
+
+	// Partial (or even full) last sector, if any
+	if (dec_size < size)
+	{
+		reset_iv(iv, ++cur_sector_lba); // Next sector's IV
+
+		if (aes_crypt_cbc(&aes, AES_DECRYPT, size - dec_size, iv.data(), &buffer[cur_offset], &buffer[cur_offset]) != 0)
+		{
+			sys_log.error("decrypt_data(): Error decrypting data on last sector read");
+			return false;
 		}
 	}
+
+	return true;
 }
 
 void iso_file_decryption::reset()
@@ -184,7 +250,7 @@ bool iso_file_decryption::init(const std::string& path)
 			}
 			else
 			{
-				hex_to_bytes(key, std::string_view(key_str, key_len), key_len);
+				hex_to_bytes(key, std::string_view(key_str, key_len), static_cast<unsigned int>(key_len));
 			}
 
 			if (aes_setkey_dec(&m_aes_dec, key, 128) == 0)
@@ -309,23 +375,7 @@ bool iso_file_decryption::decrypt(u64 offset, void* buffer, u64 size, const std:
 			}
 
 			// Decrypt the region before sending it back
-			decrypt_data(m_aes_dec, reinterpret_cast<unsigned char*>(buffer),
-				static_cast<u32>(size / ISO_SECTOR_SIZE), static_cast<u32>(offset / ISO_SECTOR_SIZE));
-
-			// TODO: Sanity check.
-			//       We are assuming that reads always start at the beginning of a sector and that all reads will be
-			//       multiples of ISO_SECTOR_SIZE
-			//
-			// NOTE: Both are easy fixes, but, code can be more simple + efficient if these two conditions are true
-			//       (which they look to be from initial testing)
-
-			/*if (size % ISO_SECTOR_SIZE != 0 || offset % ISO_SECTOR_SIZE != 0)
-			{
-				sys_log.error("decrypt(): %s: Encryption assumptions were not met, code needs to be updated, your game is probably about to crash - offset: 0x%lx, size: 0x%lx",
-					name,
-					static_cast<unsigned long int>(offset),
-					static_cast<unsigned long int>(size);
-			}*/
+			decrypt_data(m_aes_dec, offset, reinterpret_cast<unsigned char*>(buffer), size);
 
 			return true;
 		}
@@ -735,6 +785,7 @@ u64 iso_file::file_offset(u64 pos) const
 u64 iso_file::read(void* buffer, u64 size)
 {
 	const auto r = read_at(m_pos, buffer, size);
+
 	m_pos += r;
 	return r;
 }
@@ -750,11 +801,12 @@ u64 iso_file::read_at(u64 offset, void* buffer, u64 size)
 
 	const u64 archive_first_offset = file_offset(offset);
 	const u64 total_size = this->size();
+	u64 total_read;
 
 	// If it's a non-encrypted type
 	if (m_dec->get_enc_type() == iso_encryption_type::NONE)
 	{
-		u64 total_read = m_file.read_at(archive_first_offset, buffer, max_size);
+		total_read = m_file.read_at(archive_first_offset, buffer, max_size);
 
 		if (size > total_read && (offset + total_read) < total_size)
 		{
@@ -768,46 +820,75 @@ u64 iso_file::read_at(u64 offset, void* buffer, u64 size)
 
 	// IMPORTANT NOTE:
 	//
-	// For performance reasons, current "iso_file_decryption::decrypt()" method requires that reads always
-	// start at the beginning of a sector and that all reads will be multiples of ISO_SECTOR_SIZE.
-	// Both are easy fixes, but, code can be more simple + efficient if these two conditions are true
-	// (which they look to be from initial testing)
+	// "iso_file_decryption::decrypt()" method requires that offset and size are multiple of 16 bytes
+	// (ciphertext block's size) and that a previous ciphertext block (used as IV) is read in case
+	// offset is not a multiple of ISO_SECTOR_SIZE
 	//
-	//
-	// TODO:
-	//
-	// The local buffers storing the first and last sector of the reads could be replaced by caches.
-	// That will allow to avoid to read and decrypt again the entire sector on a further call to "read_at()" method
-	// if trying to read the previously not requested bytes (marked with "x" in the picture below)
-	//
-	//                                -------------------------------------------------------------------
-	//           file on ISO archive: |     '                                     '                     |
-	//                                -------------------------------------------------------------------
-	//                                      '                                     '
-	//                                      ---------------------------------------
-	//                              buffer: |                                     |
-	//                                      ---------------------------------------
-	//                                      '     '                             ' '
-	//              ---------------------------------------------------------------------------------------------------------------
-	// ISO archive: | sec 0   | sec 1   |xxx'#####|#########|#########|#########|#'xxxxxxx|         | ...     | sec n-1 | sec n   |
-	//              ---------------------------------------------------------------------------------------------------------------
-	//                                  '         '                             '         '
-	//                                  |first sec|                             |last sec |
+	//                                                ----------------------------------------------------------------------
+	//                           file on ISO archive: |     '                                           '                  |
+	//                                                ----------------------------------------------------------------------
+	//                                                      '                                           '
+	//                                                      ---------------------------------------------
+	//                                              buffer: |                                           |
+	//                                                      ---------------------------------------------
+	//                                                      '     '                                   ' '
+	//                        -------------------------------------------------------------------------------------------------------------------------------------
+	//           ISO archive: | sec 0     | sec 1     |xxxxx######'###########'###########'###########'##xxxxxxxxx|           | ...       | sec n-1   | sec n     |
+	//                        -------------------------------------------------------------------------------------------------------------------------------------
+	// 16 Bytes x block read: |   |   |   |   |   |   |   '#######'###########'###########'###########'###|   |   |   |   |   |   |   |   |   |   |   |   |   |   |
+	//                                                '           '                                   '           '
+	//                                                | first sec |           inner sec(s)            | last sec  |
 
 	const u64 archive_last_offset = archive_first_offset + max_size - 1;
 	iso_sector first_sec, last_sec;
+	u64 offset_first_out;
+	u64 offset_aligned;
+	u64 offset_aligned_first_out;
 
-	first_sec.archive_first_addr = (archive_first_offset / ISO_SECTOR_SIZE) * ISO_SECTOR_SIZE;
+	first_sec.lba_address = (archive_first_offset / ISO_SECTOR_SIZE) * ISO_SECTOR_SIZE;
 	first_sec.offset = archive_first_offset % ISO_SECTOR_SIZE;
-	first_sec.size = archive_last_offset < (first_sec.archive_first_addr + ISO_SECTOR_SIZE) ? max_size : ISO_SECTOR_SIZE - first_sec.offset;
-	last_sec.archive_first_addr = (archive_last_offset / ISO_SECTOR_SIZE) * ISO_SECTOR_SIZE;
-	last_sec.offset = 0;
+	first_sec.size = first_sec.offset + max_size <= ISO_SECTOR_SIZE ? max_size : ISO_SECTOR_SIZE - first_sec.offset;
+
+	last_sec.lba_address = last_sec.address_aligned = (archive_last_offset / ISO_SECTOR_SIZE) * ISO_SECTOR_SIZE;
+	last_sec.offset = last_sec.offset_aligned = 0;
 	last_sec.size = (archive_last_offset % ISO_SECTOR_SIZE) + 1;
 
-	u64 sec_count = (last_sec.archive_first_addr - first_sec.archive_first_addr) / ISO_SECTOR_SIZE + 1;
-	u64 sec_inner_size = (sec_count - 2) * ISO_SECTOR_SIZE;
+	offset_first_out = first_sec.offset + first_sec.size;
+	offset_aligned = first_sec.offset & ~0xF;
+	offset_aligned_first_out = (first_sec.offset + first_sec.size) & ~0xF;
 
-	if (m_file.read_at(first_sec.archive_first_addr, first_sec.buf.data(), ISO_SECTOR_SIZE) != ISO_SECTOR_SIZE)
+	first_sec.offset_aligned = offset_aligned != 0 ? offset_aligned - 16 : 0; // Eventually include the previous block (used as IV)
+	first_sec.size_aligned = offset_aligned_first_out != (first_sec.offset + first_sec.size) ?
+		offset_aligned_first_out + 16 - first_sec.offset_aligned :
+		offset_aligned_first_out - first_sec.offset_aligned;
+	first_sec.address_aligned = first_sec.lba_address + first_sec.offset_aligned;
+
+	offset_aligned_first_out = last_sec.size & ~0xF;
+
+	last_sec.size_aligned = offset_aligned_first_out != last_sec.size ?
+		offset_aligned_first_out + 16 :
+		offset_aligned_first_out;
+
+	u64 sector_count = (last_sec.lba_address - first_sec.lba_address) / ISO_SECTOR_SIZE + 1;
+	u64 sector_inner_size = sector_count > 2 ? (sector_count - 2) * ISO_SECTOR_SIZE : 0;
+	u64 expected_read;
+
+	expected_read = first_sec.size_aligned;
+	total_read = m_file.read_at(first_sec.address_aligned, &first_sec.buf.data()[first_sec.offset_aligned], first_sec.size_aligned);
+
+	if (sector_count > 2) // If inner sector(s) are present
+	{
+		expected_read += sector_inner_size;
+		total_read += m_file.read_at(first_sec.lba_address + ISO_SECTOR_SIZE, &reinterpret_cast<u8*>(buffer)[first_sec.size], sector_inner_size);
+	}
+
+	if (sector_count > 1) // If last sector is present
+	{
+		expected_read += last_sec.size_aligned;
+		total_read += m_file.read_at(last_sec.address_aligned, last_sec.buf.data(), last_sec.size_aligned);
+	}
+
+	if (total_read != expected_read)
 	{
 		sys_log.error("read_at(): %s: Error reading from file", m_meta.name);
 
@@ -815,44 +896,19 @@ u64 iso_file::read_at(u64 offset, void* buffer, u64 size)
 		return 0;
 	}
 
-	// Decrypt read buffer (if needed) and copy to destination buffer
-	m_dec->decrypt(first_sec.archive_first_addr, first_sec.buf.data(), ISO_SECTOR_SIZE, m_meta.name);
-	memcpy(buffer, first_sec.buf.data() + first_sec.offset, first_sec.size);
+	m_dec->decrypt(first_sec.address_aligned, &first_sec.buf.data()[first_sec.offset_aligned], first_sec.size_aligned, m_meta.name);
+	memcpy(buffer, &first_sec.buf.data()[first_sec.offset], first_sec.size);
 
-	// If the sector was already read, decrypted and copied to destination buffer, nothing more to do
-	if (sec_count < 2)
+	if (sector_count > 2) // If inner sector(s) are present
 	{
-		return max_size;
+		m_dec->decrypt(first_sec.lba_address + ISO_SECTOR_SIZE, &reinterpret_cast<u8*>(buffer)[first_sec.size], sector_inner_size, m_meta.name);
 	}
 
-	if (m_file.read_at(last_sec.archive_first_addr, last_sec.buf.data(), ISO_SECTOR_SIZE) != ISO_SECTOR_SIZE)
+	if (sector_count > 1) // If last sector is present
 	{
-		sys_log.error("read_at(): %s: Error reading from file", m_meta.name);
-
-		seek(m_pos, fs::seek_set);
-		return 0;
+		m_dec->decrypt(last_sec.address_aligned, last_sec.buf.data(), last_sec.size_aligned, m_meta.name);
+		memcpy(&reinterpret_cast<u8*>(buffer)[max_size - last_sec.size], last_sec.buf.data(), last_sec.size);
 	}
-
-	// Decrypt read buffer (if needed) and copy to destination buffer
-	m_dec->decrypt(last_sec.archive_first_addr, last_sec.buf.data(), ISO_SECTOR_SIZE, m_meta.name);
-	memcpy(reinterpret_cast<u8*>(buffer) + max_size - last_sec.size, last_sec.buf.data(), last_sec.size);
-
-	// If the sector was already read, decrypted and copied to destination buffer, nothing more to do
-	if (sec_count < 3)
-	{
-		return max_size;
-	}
-
-	if (m_file.read_at(first_sec.archive_first_addr + ISO_SECTOR_SIZE, reinterpret_cast<u8*>(buffer) + first_sec.size, sec_inner_size) != sec_inner_size)
-	{
-		sys_log.error("read_at(): %s: Error reading from file", m_meta.name);
-
-		seek(m_pos, fs::seek_set);
-		return 0;
-	}
-
-	// Decrypt read buffer (if needed) and copy to destination buffer
-	m_dec->decrypt(first_sec.archive_first_addr + ISO_SECTOR_SIZE, reinterpret_cast<u8*>(buffer) + first_sec.size, sec_inner_size, m_meta.name);
 
 	return max_size;
 }
